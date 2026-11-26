@@ -1,6 +1,6 @@
 # ADR-0032: One host rule
 
-- Status: Accepted; amended 2026-11-21 (#521), 2026-11-26 (#524), 2026-11-26 (#644)
+- Status: Accepted; amended 2026-11-21 (#521), 2026-11-26 (#524), 2026-11-26 (#644), 2026-11-26 (#656)
 - Date: 2026-11-19
 - Issue: #520 (tracker #486); amends ADR-0018 §1–2, ADR-0020 §4 and ADR-0008 §4, §8–9
 
@@ -119,6 +119,15 @@ model: one normalization at load, applied to both sides.
 
 Each class's rule is a setting shape (ADR-0031 §3). It calls `internal/host` and refuses through the
 shape's refusal.
+
+_Amended 2026-11-26 (#656):_ the record of each rule's decisions is the host decision goldens: every check that reads a
+host, each setting of every class here and the Host, Origin, CIMD, denylist and IdP endpoint checks,
+judged on generated input families. Each package that owns a check keeps a summary by family,
+`testdata/hostdecisions.golden`, and the inputs each check passes, `testdata/hostdecisions.allowed`,
+which is edited by hand, so a widening is a reviewed line. What a check passes today but should not is
+listed with its issue in `testdata/hostdecisions.residuals`. The packages are listed in
+`internal/testutil/hostfamilies` (`Columns`). The refusal messages stay in
+`internal/config/testdata/hostrule.golden`.
 
 | Class | Settings and comparisons | Rule |
 |---|---|---|

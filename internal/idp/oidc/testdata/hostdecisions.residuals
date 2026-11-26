@@ -1,0 +1,931 @@
+# Inputs a host check passes today that it should not, each with the issue that decides it (#656):
+# the column, a tab, the input as Go quotes it, a tab, the issue, a tab, why. Each is also in
+# hostdecisions.allowed. The fix deletes it from both, and the test then holds it refused.
+IdP endpoint	"https://*:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://*]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://-a.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://.mcp.example.com]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0.0.0.0]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://010.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0177.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://0x7f.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.0.0.999]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://10.244.1.17]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1.5]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.0.0.2]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://127.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://2130706433]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://4294967296]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://8.8.8.8]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://@mcp.example.com/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://LOCALHOST]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://MCP.Example.COM]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://S3CRET~tok]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[0:0::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[0:0::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[0:0::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[0:0::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[0:0::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:DB8::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:DB8::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:DB8::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:DB8::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:DB8::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:db8::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:db8::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:db8::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:db8::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[2001:db8::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::FFFF:7f00:1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::FFFF:7f00:1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::FFFF:7f00:1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::FFFF:7f00:1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::FFFF:7f00:1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:127.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:127.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:127.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:127.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:127.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:8.8.8.8]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:8.8.8.8]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:8.8.8.8]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:8.8.8.8]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[::ffff:8.8.8.8]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fd00::17]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fd00::17]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fd00::17]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fd00::17]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fd00::17]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fe80::1%25:80]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]:80]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:0/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:080/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:123456/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:443/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:65535/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:65536/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:80/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:8080/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:80]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]]:9090/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25]x:80]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0:80]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:0/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:080/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:123456/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:443/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:65535/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:65536/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:80/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:8080/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:80]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]:9090/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]?x/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:0/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:080/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:123456/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:443/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:65535/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:65536/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:80/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:8080/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:80]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]]:9090/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1%25eth0]x:80]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://[fe80::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fe80::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fe80::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fe80::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://[fe80::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a-.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://a..b]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://app.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://b%C3%BCcher.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://byward-metrics.monitoring.svc]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://bücher.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://evil.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://localhost]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.10]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com#f/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com.]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com?/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com?x=1/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://mcp.example.com]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://my_mcp]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://single]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://u:pw@mcp.example.com/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://u@[fe80::1%25eth0]/token"	#651	a zoned IPv6 address
+IdP endpoint	"https://u@mcp.example.com/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://xn--bcher-kva.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint	"https://ｍｃｐ.example.com]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.2:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.2:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.2:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.2:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://127.0.0.2:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://LOCALHOST:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://LOCALHOST:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://LOCALHOST:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://LOCALHOST:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://LOCALHOST:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[0:0::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[0:0::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[0:0::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[0:0::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[0:0::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::FFFF:7f00:1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::FFFF:7f00:1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::FFFF:7f00:1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::FFFF:7f00:1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::FFFF:7f00:1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::ffff:127.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::ffff:127.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::ffff:127.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::ffff:127.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://[::ffff:127.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://localhost:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://localhost:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://localhost:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://localhost:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"http://localhost:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://*]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://-a.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://.mcp.example.com]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0.0.0.0]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://010.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0177.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://0x7f.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.0.0.999]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://10.244.1.17]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1.5]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.0.0.2]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://127.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://2130706433]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://4294967296]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://8.8.8.8]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://@mcp.example.com/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://LOCALHOST]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://MCP.Example.COM]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://S3CRET~tok]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[0:0::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[0:0::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[0:0::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[0:0::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[0:0::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:DB8::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:DB8::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:DB8::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:DB8::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:DB8::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:db8::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:db8::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:db8::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:db8::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[2001:db8::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::FFFF:7f00:1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::FFFF:7f00:1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::FFFF:7f00:1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::FFFF:7f00:1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::FFFF:7f00:1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:127.0.0.1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:127.0.0.1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:127.0.0.1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:127.0.0.1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:127.0.0.1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:8.8.8.8]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:8.8.8.8]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:8.8.8.8]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:8.8.8.8]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[::ffff:8.8.8.8]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fd00::17]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fd00::17]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fd00::17]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fd00::17]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fd00::17]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fe80::1%25:80]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]:80]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:0/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:080/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:123456/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:443/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:65535/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:65536/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:80/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:8080/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:80]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]]:9090/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25]x:80]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0:80]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:0/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:080/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:123456/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:443/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:65535/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:65536/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:80/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:8080/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:80]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]:9090/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]?x/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:0/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:080/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:123456/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:443/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:65535/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:65536/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:80/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:8080/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:80]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]]:9090/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1%25eth0]x:80]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://[fe80::1]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fe80::1]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fe80::1]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fe80::1]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://[fe80::1]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a-.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://a..b]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://app.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://b%C3%BCcher.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://byward-metrics.monitoring.svc]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://bücher.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://evil.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://localhost]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.10]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com#f/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com.]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com?/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com?x=1/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://mcp.example.com]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://my_mcp]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://single]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://u:pw@mcp.example.com/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://u@[fe80::1%25eth0]/token"	#651	a zoned IPv6 address
+IdP endpoint, --dev	"https://u@mcp.example.com/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://xn--bcher-kva.example]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com]:/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com]:0/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com]:080/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com]:123456/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port
+IdP endpoint, --dev	"https://ｍｃｐ.example.com]:65536/token"	#651	checkURL takes any URL with a host; the URL settings' rule (urlReason, nameReason) refuses this host or port

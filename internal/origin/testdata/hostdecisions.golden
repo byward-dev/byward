@@ -1,0 +1,140 @@
+# The decision of every check in internal/origin that reads a host, by input family (#656).
+# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. The inputs that pass are listed in hostdecisions.allowed,
+# which is edited by hand; a denylist's lines there are the inputs it stops. The refusal messages per
+# setting are in internal/config/testdata/hostrule.golden.
+
+## public Host: 24 pass, 5752 refused, of 5776
+by family:
+  name                     pass     6  refused   966
+  name edge                pass     0  refused  1296
+  idn                      pass     3  refused   429
+  ipv4                     pass     1  refused   539
+  ipv4 spelling            pass     4  refused   752
+  ipv6                     pass    10  refused   746
+  ipv4-mapped              pass     0  refused   324
+  zone                     pass     0  refused   700
+by wrap:
+  bare                     pass    16  refused   937
+  [h]                      pass     8  refused   946
+  [h                       pass     0  refused   953
+  h]                       pass     0  refused   972
+  [h]]                     pass     0  refused   972
+  [h]x                     pass     0  refused   972
+by port:
+  none                     pass     7  refused   312
+  :                        pass     0  refused   321
+  :443                     pass     5  refused   316
+  :80                      pass     5  refused   316
+  :8080                    pass     7  refused   314
+  :9090                    pass     0  refused   321
+  :65535                   pass     0  refused   321
+  :0                       pass     0  refused   321
+  :65536                   pass     0  refused   321
+  :123456                  pass     0  refused   321
+  :080                     pass     0  refused   321
+  :+80                     pass     0  refused   321
+  :-1                      pass     0  refused   321
+  :0x50                    pass     0  refused   321
+  :8a                      pass     0  refused   321
+  :８０                      pass     0  refused   321
+  :80:80                   pass     0  refused   321
+  :80]                     pass     0  refused   321
+refused because:
+   5752  421
+
+## internal Host: 459 pass, 5317 refused, of 5776
+by family:
+  name                     pass    30  refused   942
+  name edge                pass     0  refused  1296
+  idn                      pass     0  refused   432
+  ipv4                     pass    50  refused   490
+  ipv4 spelling            pass    50  refused   706
+  ipv6                     pass   131  refused   625
+  ipv4-mapped              pass    42  refused   282
+  zone                     pass   156  refused   544
+by wrap:
+  bare                     pass   296  refused   657
+  [h]                      pass   150  refused   804
+  [h                       pass    13  refused   940
+  h]                       pass     0  refused   972
+  [h]]                     pass     0  refused   972
+  [h]x                     pass     0  refused   972
+by port:
+  none                     pass    42  refused   277
+  :                        pass    34  refused   287
+  :443                     pass    41  refused   280
+  :80                      pass    41  refused   280
+  :8080                    pass    41  refused   280
+  :9090                    pass    41  refused   280
+  :65535                   pass    34  refused   287
+  :0                       pass    41  refused   280
+  :65536                   pass    34  refused   287
+  :123456                  pass     6  refused   315
+  :080                     pass    41  refused   280
+  :+80                     pass     6  refused   315
+  :-1                      pass     6  refused   315
+  :0x50                    pass     6  refused   315
+  :8a                      pass    13  refused   308
+  :８０                      pass     6  refused   315
+  :80:80                   pass    13  refused   308
+  :80]                     pass    13  refused   308
+refused because:
+   5317  421
+
+## Origin: 13 pass, 11556 refused, of 11569
+by family:
+  name                     pass     2  refused  1942
+  name edge                pass     0  refused  2592
+  idn                      pass     2  refused   862
+  ipv4                     pass     1  refused  1079
+  ipv4 spelling            pass     4  refused  1508
+  ipv6                     pass     4  refused  1508
+  ipv4-mapped              pass     0  refused   648
+  zone                     pass     0  refused  1400
+  url shape                pass     0  refused    17
+by wrap:
+  bare                     pass     9  refused  1897
+  [h]                      pass     4  refused  1904
+  [h                       pass     0  refused  1906
+  h]                       pass     0  refused  1944
+  [h]]                     pass     0  refused  1944
+  [h]x                     pass     0  refused  1944
+  scheme in upper case     pass     0  refused     1
+  user                     pass     0  refused     1
+  user and password        pass     0  refused     1
+  empty user info          pass     0  refused     1
+  query                    pass     0  refused     1
+  empty query              pass     0  refused     1
+  fragment                 pass     0  refused     1
+  no //                    pass     0  refused     1
+  one /                    pass     0  refused     1
+  another scheme           pass     0  refused     1
+  no scheme                pass     0  refused     1
+  zone and user            pass     0  refused     1
+  zone and query           pass     0  refused     1
+  zone in a path           pass     0  refused     1
+  escaped bracket          pass     0  refused     1
+  white space              pass     0  refused     1
+  backslash                pass     0  refused     1
+by port:
+  none                     pass     4  refused   634
+  :                        pass     0  refused   642
+  :443                     pass     4  refused   638
+  :80                      pass     0  refused   642
+  :8080                    pass     5  refused   637
+  :9090                    pass     0  refused   642
+  :65535                   pass     0  refused   642
+  :0                       pass     0  refused   642
+  :65536                   pass     0  refused   642
+  :123456                  pass     0  refused   642
+  :080                     pass     0  refused   642
+  :+80                     pass     0  refused   642
+  :-1                      pass     0  refused   642
+  :0x50                    pass     0  refused   642
+  :8a                      pass     0  refused   642
+  :８０                      pass     0  refused   642
+  :80:80                   pass     0  refused   642
+  :80]                     pass     0  refused   642
+  -                        pass     0  refused    17
+refused because:
+  11556  403

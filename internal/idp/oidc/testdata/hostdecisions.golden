@@ -1,0 +1,124 @@
+# The decision of every check in internal/idp/oidc that reads a host, by input family (#656).
+# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. The inputs that pass are listed in hostdecisions.allowed,
+# which is edited by hand; a denylist's lines there are the inputs it stops. The refusal messages per
+# setting are in internal/config/testdata/hostrule.golden.
+
+## IdP endpoint: 927 pass, 10642 refused, of 11569
+by family:
+  name                     pass   198  refused  1746
+  name edge                pass   209  refused  2383
+  idn                      pass    88  refused   776
+  ipv4                     pass   110  refused   970
+  ipv4 spelling            pass   154  refused  1358
+  ipv6                     pass    83  refused  1429
+  ipv4-mapped              pass    34  refused   614
+  zone                     pass    41  refused  1359
+  url shape                pass    10  refused     7
+by wrap:
+  bare                     pass   374  refused  1532
+  [h]                      pass   123  refused  1785
+  [h                       pass     9  refused  1897
+  h]                       pass   385  refused  1559
+  [h]]                     pass    24  refused  1920
+  [h]x                     pass     2  refused  1942
+  scheme in upper case     pass     1  refused     0
+  user                     pass     1  refused     0
+  user and password        pass     1  refused     0
+  empty user info          pass     1  refused     0
+  query                    pass     1  refused     0
+  empty query              pass     1  refused     0
+  fragment                 pass     1  refused     0
+  no //                    pass     0  refused     1
+  one /                    pass     0  refused     1
+  another scheme           pass     0  refused     1
+  no scheme                pass     0  refused     1
+  zone and user            pass     1  refused     0
+  zone and query           pass     1  refused     0
+  zone in a path           pass     1  refused     0
+  escaped bracket          pass     0  refused     1
+  white space              pass     0  refused     1
+  backslash                pass     0  refused     1
+by port:
+  none                     pass    82  refused   556
+  :                        pass    82  refused   560
+  :443                     pass    82  refused   560
+  :80                      pass    82  refused   560
+  :8080                    pass    82  refused   560
+  :9090                    pass    82  refused   560
+  :65535                   pass    82  refused   560
+  :0                       pass    82  refused   560
+  :65536                   pass    82  refused   560
+  :123456                  pass    82  refused   560
+  :080                     pass    82  refused   560
+  :+80                     pass     0  refused   642
+  :-1                      pass     0  refused   642
+  :0x50                    pass     0  refused   642
+  :8a                      pass     0  refused   642
+  :８０                      pass     0  refused   642
+  :80:80                   pass     0  refused   642
+  :80]                     pass    15  refused   627
+  -                        pass    10  refused     7
+refused because:
+   9704  is not an absolute URL
+    918  must use https
+     20  has no host before its port
+
+## IdP endpoint, --dev: 1015 pass, 10554 refused, of 11569
+by family:
+  name                     pass   220  refused  1724
+  name edge                pass   209  refused  2383
+  idn                      pass    88  refused   776
+  ipv4                     pass   132  refused   948
+  ipv4 spelling            pass   154  refused  1358
+  ipv6                     pass   105  refused  1407
+  ipv4-mapped              pass    56  refused   592
+  zone                     pass    41  refused  1359
+  url shape                pass    10  refused     7
+by wrap:
+  bare                     pass   418  refused  1488
+  [h]                      pass   167  refused  1741
+  [h                       pass     9  refused  1897
+  h]                       pass   385  refused  1559
+  [h]]                     pass    24  refused  1920
+  [h]x                     pass     2  refused  1942
+  scheme in upper case     pass     1  refused     0
+  user                     pass     1  refused     0
+  user and password        pass     1  refused     0
+  empty user info          pass     1  refused     0
+  query                    pass     1  refused     0
+  empty query              pass     1  refused     0
+  fragment                 pass     1  refused     0
+  no //                    pass     0  refused     1
+  one /                    pass     0  refused     1
+  another scheme           pass     0  refused     1
+  no scheme                pass     0  refused     1
+  zone and user            pass     1  refused     0
+  zone and query           pass     1  refused     0
+  zone in a path           pass     1  refused     0
+  escaped bracket          pass     0  refused     1
+  white space              pass     0  refused     1
+  backslash                pass     0  refused     1
+by port:
+  none                     pass    90  refused   548
+  :                        pass    90  refused   552
+  :443                     pass    90  refused   552
+  :80                      pass    90  refused   552
+  :8080                    pass    90  refused   552
+  :9090                    pass    90  refused   552
+  :65535                   pass    90  refused   552
+  :0                       pass    90  refused   552
+  :65536                   pass    90  refused   552
+  :123456                  pass    90  refused   552
+  :080                     pass    90  refused   552
+  :+80                     pass     0  refused   642
+  :-1                      pass     0  refused   642
+  :0x50                    pass     0  refused   642
+  :8a                      pass     0  refused   642
+  :８０                      pass     0  refused   642
+  :80:80                   pass     0  refused   642
+  :80]                     pass    15  refused   627
+  -                        pass    10  refused     7
+refused because:
+   9704  is not an absolute URL
+    830  must use https
+     20  has no host before its port
