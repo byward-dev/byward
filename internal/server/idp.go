@@ -18,7 +18,6 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/idp/oidc"
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // identityProvider is the IdP users sign in with (BYWARD_IDP): its adapter, the name that labels
@@ -159,7 +158,7 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 		refused = &Warning{Message: "the client key signs with " + info.SigningAlgorithm() + ", which " + oidc.Presets[preset].Label +
 			" refuses for client assertions", Setting: keyAlgSetting, Fix: oidc.RefusedAssertionAdvice(info.SigningAlgorithm(), oidc.Presets[preset])}
 	}
-	ip := &identityProvider{name: cfg.IdP, redirect: redirect, label: oidcLabel(cfg), adapter: p, scope: p.Scope(), gateIdP: gate.Generic, userKey: oidcUserKey,
+	ip := &identityProvider{name: cfg.IdP, redirect: redirect, label: oidcLabel(cfg), adapter: p, scope: p.Scope(), gateIdP: gate.Generic, userKey: p.UserKey,
 		credentialDesc: credentialDesc,
 		diagnose: func(ctx context.Context, _ time.Time) []doctor.Result {
 			return append(diagnoseDiscovery(ctx, p, cfg.ShownIssuer(), loopbackHTTP), withCredential(p.DiagnoseClient(ctx, oidcDiagnosis(cfg)), credentialDesc, refused))
@@ -194,28 +193,6 @@ func withCredential(r doctor.Result, credentialDesc string, refused *Warning) do
 	}
 	r.Fix += warningFix(*refused)
 	return r
-}
-
-// maxSubject is the longest sub an IdP may send. OIDC Core 1.0 §2: "It MUST NOT exceed 255 ASCII
-// [RFC20] characters in length."
-const maxSubject = 255
-
-// oidcUserKey is an oidc subject as an operator gives it to revoke-user: exactly as the IdP sends it
-// (sub is case-sensitive), trimmed. It is never empty, longer than maxSubject, or anything but
-// printable ASCII, as OIDC Core allows a sub, and never shaped like a credential (logging.LooksSecret),
-// which no IdP issues as a sub: a token pasted in its place is refused, so it is neither printed nor
-// stored as a revoked subject (#594).
-func oidcUserKey(s string) (string, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" || len(s) > maxSubject || logging.LooksSecret(s) {
-		return "", false
-	}
-	for i := range len(s) {
-		if s[i] < 0x20 || s[i] > 0x7e {
-			return "", false
-		}
-	}
-	return s, true
 }
 
 // oidcLabel is BYWARD_OIDC_NAME, else the preset's name, else the issuer's host.

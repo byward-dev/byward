@@ -454,24 +454,38 @@ var tokenForms = []struct{ name, value string }{
 }
 
 // The operator commands show no argument they were given and refuse (#594). Every command but
-// revoke-user takes only fixed words, so a value in any position gets its usage line. revoke-user
-// under an oidc IdP takes a key as the IdP sends a sub (TestRevokeUserShowsNoKeyItWasGiven covers
-// Entra): any secret form it could send as a sub is accepted, and may be named as the user it
-// revokes; these runs have no store, so none succeeds and none is shown. A token is no user key
-// under either IdP, and is refused by its length. Nothing reaches os.Stderr or the log package.
+// revoke-user and init takes only fixed words, so a value after them gets the command's usage line;
+// init has TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints. revoke-user under an oidc IdP keyed on
+// sub takes a key only as OIDC Core allows a sub: a secret form within that rule is accepted (these
+// runs have no store, so none is revoked or shown), any other is refused and named by its length.
+// A token is no user key under either IdP (TestRevokeUserShowsNoKeyItWasGiven covers Entra's other
+// forms). Every command in the commands map has a cell here or names its test. Nothing reaches
+// os.Stderr or the log package.
 func TestOperatorCommandsShowNoArgumentTheyRefuse(t *testing.T) {
+	const (
+		checkUsage           = "byward: usage: byward check --offline [-- stdio-upstream-command [args...]] (for the network checks, run byward doctor)\n"
+		doctorUsage          = "byward: usage: byward doctor [--json] [-- stdio-upstream-command [args...]]\n"
+		jwksUsage            = "byward: usage: byward jwks (prints the JWKS; redirect it to a file)\n"
+		downstreamTokenUsage = "byward: usage: byward downstream-token [--json] (run by a stdio upstream process or one of its descendants)\n"
+		storeMissingLine     = "byward: revoke-user: BYWARD_STORE_DIR" + storeMissing
+	)
+	coveredElsewhere := map[string]string{"init": "TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints"}
 	processStderr := redirectStderr(t)
 	entraEnv, _, _ := operatorEnv(t, noStore)
 	oidcEnv := append(without(entraEnv, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(entraEnv, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
 		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
-	const notAUserKey = "byward: revoke-user ("
-	type cell struct {
-		place, want string
-		args, env   []string
-		mayAccept   bool // an oidc IdP may take the value as a subject
+	refused := func(v string) string {
+		return "byward: revoke-user " + logging.NotShown(v) + ": " + server.ErrNotAUserKey.Error() + "\n"
 	}
+	type cell struct {
+		place     string
+		want      []string // stderr is exactly one of these
+		args, env []string
+	}
+	placed := map[string]bool{}
 	run := func(t *testing.T, form string, cells []cell) {
 		for _, c := range cells {
+			placed[c.args[0]] = true
 			t.Run(c.place+"/"+form, func(t *testing.T) {
 				code, stdout, stderr := runWith(c.args, c.env...)
 				if shows(stderr) || shows(stdout) {
@@ -480,35 +494,43 @@ func TestOperatorCommandsShowNoArgumentTheyRefuse(t *testing.T) {
 				if got := processStderr(t); got != "" {
 					t.Errorf("wrote %q to os.Stderr or the log package, want nothing", got)
 				}
-				if code != exitConfig || !c.mayAccept && !strings.HasPrefix(stderr, c.want) {
-					t.Errorf("exit %d, stderr %q; want exit %d and %q", code, stderr, exitConfig, c.want)
+				if code != exitConfig || stdout != "" || !slices.Contains(c.want, stderr) {
+					t.Errorf("exit %d, stdout %q, stderr %q; want exit %d and exactly one of %q", code, stdout, stderr, exitConfig, c.want)
 				}
 			})
 		}
 	}
-	usage := func(command string) string { return "byward: usage: byward " + command }
 	others := func(v string) []cell {
 		return []cell{
-			{place: "revoke-user, a second key", want: usage("revoke-user"), args: []string{"revoke-user", "u1", v}, env: entraEnv},
-			{place: "revoke-all", want: usage("revoke-all"), args: []string{"revoke-all", v}, env: entraEnv},
-			{place: "revoke-all --yes, then a value", want: usage("revoke-all"), args: []string{"revoke-all", "--yes", v}, env: entraEnv},
-			{place: "store", want: usage("store"), args: []string{"store", v}, env: entraEnv},
-			{place: "store new-epoch --yes, then a value", want: usage("store"), args: []string{"store", "new-epoch", "--yes", v}, env: entraEnv},
-			{place: "check", want: usage("check"), args: []string{"check", v}, env: entraEnv},
-			{place: "doctor", want: usage("doctor"), args: []string{"doctor", v}, env: entraEnv},
-			{place: "jwks", want: usage("jwks"), args: []string{"jwks", v}, env: entraEnv},
-			{place: "downstream-token", want: usage("downstream-token"), args: []string{"downstream-token", v}, env: entraEnv},
+			{"revoke-user, a second key", []string{revokeUserUsage}, []string{"revoke-user", "u1", v}, entraEnv},
+			{"revoke-all", []string{revokeAllUsage}, []string{"revoke-all", v}, entraEnv},
+			{"revoke-all --yes, then a value", []string{revokeAllUsage}, []string{"revoke-all", "--yes", v}, entraEnv},
+			{"store", []string{newEpochUsage}, []string{"store", v}, entraEnv},
+			{"store new-epoch, then a value", []string{newEpochUsage}, []string{"store", "new-epoch", v}, entraEnv},
+			{"store new-epoch --yes, then a value", []string{newEpochUsage}, []string{"store", "new-epoch", "--yes", v}, entraEnv},
+			{"check", []string{checkUsage}, []string{"check", v}, entraEnv},
+			{"check --offline, then a value", []string{checkUsage}, []string{"check", "--offline", v}, entraEnv},
+			{"doctor", []string{doctorUsage}, []string{"doctor", v}, entraEnv},
+			{"doctor --json, then a value", []string{doctorUsage}, []string{"doctor", "--json", v}, entraEnv},
+			{"jwks", []string{jwksUsage}, []string{"jwks", v}, entraEnv},
+			{"downstream-token", []string{downstreamTokenUsage}, []string{"downstream-token", v}, entraEnv},
+			{"downstream-token --json, then a value", []string{downstreamTokenUsage}, []string{"downstream-token", "--json", v}, entraEnv},
 		}
 	}
 	for _, form := range append(slices.Clone(secretForms), hostForm) {
 		v := form.value
 		run(t, form.name, append(others(v),
-			cell{place: "revoke-user, oidc", want: notAUserKey, args: []string{"revoke-user", v}, env: oidcEnv, mayAccept: true}))
+			cell{"revoke-user, oidc", []string{storeMissingLine, refused(v)}, []string{"revoke-user", v}, oidcEnv}))
 	}
 	for _, form := range tokenForms {
 		v := form.value
 		run(t, form.name, append(others(v),
-			cell{place: "revoke-user, entra", want: notAUserKey, args: []string{"revoke-user", v}, env: entraEnv},
-			cell{place: "revoke-user, oidc", want: notAUserKey, args: []string{"revoke-user", v}, env: oidcEnv}))
+			cell{"revoke-user, entra", []string{refused(v)}, []string{"revoke-user", v}, entraEnv},
+			cell{"revoke-user, oidc", []string{refused(v)}, []string{"revoke-user", v}, oidcEnv}))
+	}
+	for name := range commands {
+		if !placed[name] && coveredElsewhere[name] == "" {
+			t.Errorf("operator command %q has no cell here: add one, or name the test that covers it", name)
+		}
 	}
 }

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/idp/oidc"
 	"github.com/byward-dev/byward/internal/store"
 )
 
@@ -21,7 +23,8 @@ var ErrNeedsAuthentication = errors.New("the broker's store is off with BYWARD_I
 var ErrNoStore = store.ErrNoStore
 
 // ErrNotAUserKey is RevokeUser's answer to a key that is not a user key of the configured IdP.
-var ErrNotAUserKey = errors.New("not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub), at most 255 ASCII characters, as the audit records' user_key shows it")
+var ErrNotAUserKey = errors.New("not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub; a sub is at most " +
+	strconv.Itoa(oidc.MaxSubject) + " printable ASCII characters), as the audit records' user_key shows it")
 
 // ConfigError is an operator command's answer to settings it cannot build from, such as an IdP
 // credential file that holds no key: the error server.New gives for the same settings, which the

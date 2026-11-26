@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/sqlite"
@@ -259,47 +261,10 @@ func TestRevokeUserTakesAnOIDCSubjectAsItIs(t *testing.T) {
 	}
 }
 
-// An oidc user key is a sub as an IdP may send one: OIDC Core 1.0 §2 allows at most 255 ASCII
-// characters. So the subjects real IdPs issue are taken as they are, and a pasted token or credential
-// is refused, so it is neither printed nor revoked as a subject (#594).
-func TestAnOIDCUserKeyIsASubjectAsAnIdPSendsOneNeverACredential(t *testing.T) {
-	long := strings.Repeat("a", 255)
-	for name, key := range map[string]string{
-		"Google, numeric":         "110169484474386276334",
-		"Okta":                    "00u1abcd2EFGHijkl3m4",
-		"Keycloak, a UUID":        "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-		"Auth0, provider|id":      "auth0|5f7c8ec7c33c6c004bbafe82",
-		"255 ASCII characters":    long,
-		"with a space inside":     "user one",
-		"printable ASCII symbols": "a!~#$%&'()*+,-./:;<=>?@[]^_`{|}",
-	} {
-		if got, ok := oidcUserKey(" " + key + " "); !ok || got != key {
-			t.Errorf("%s: oidcUserKey(%q) = %q, %v; want it as given, trimmed", name, key, got, ok)
-		}
-	}
-	for name, key := range map[string]string{
-		"empty":                     "  ",
-		"256 characters":            long + "a",
-		"a compact JWS":             "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.c2ln",
-		"a JWT cut short":           "eyJhbGciOiJub25lIn0.",
-		"a Bearer credential":       "Bearer abc123",
-		"a Basic credential":        "basic YTpi",
-		"non-ASCII":                 "ålice",
-		"a control character":       "a\x00b",
-		"a line break":              "alice\nbob",
-		"DEL":                       "a\x7fb",
-		"a full-width ASCII letter": "ａlice",
-	} {
-		if got, ok := oidcUserKey(key); ok {
-			t.Errorf("%s: oidcUserKey(%q) = %q, accepted; want it refused", name, key, got)
-		}
-	}
-}
-
-// A token given to revoke-user as an oidc user key is refused before the store opens: no grant is
-// revoked, nothing is audited, and the token is in no log line (#594). A grant whose subject is that
-// very string shows the refusal is not a lookup that found nothing.
-func TestRevokeUserRefusesATokenAsAnOIDCSubjectAndStoresNothing(t *testing.T) {
+// A token given to revoke-user as an oidc sub is refused: no grant is revoked, nothing is audited,
+// and the token is in no log line (#594). A grant whose subject is that very string shows the refusal
+// is not a lookup that found nothing.
+func TestRevokeUserRefusesATokenAsAnOIDCSubAndRevokesNobody(t *testing.T) {
 	const token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJMSzdDQU5BUlkifQ.LK7CANARY"
 	cfg := loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c")
 	withStore(t, cfg, func(st *sqlite.Store) {
@@ -317,6 +282,65 @@ func TestRevokeUserRefusesATokenAsAnOIDCSubjectAndStoresNothing(t *testing.T) {
 		t.Fatal("a refused key revoked a grant")
 	}
 	if logs.Len() != 0 {
-		t.Fatalf("a refused key logged, opened the store or audited: %s", logs.String())
+		t.Fatalf("a refused key logged or audited: %s", logs.String())
+	}
+}
+
+// Under a subject claim other than sub, a user key is whatever the IdP put there (#594): revoke-user
+// revokes it however it is written, so every user sign-in stored stays revocable. Through the real
+// logger, the audit record names a credential-shaped key (logging.LooksSecret, which also matches a
+// name such as "Ann Basic Lee" or an email that happens to read like a token) as [REDACTED], and no
+// other attribute carries any part of it; any other key is named in full.
+func TestRevokeUserRevokesAnyKeyAnotherSubjectClaimHoldsAndAuditsACredentialShapedOneRedacted(t *testing.T) {
+	for _, tc := range []struct {
+		claim, key string
+		redacted   bool
+	}{
+		{"name", "Ann Basic Lee", true},
+		{"email", "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJMSzdDQU5BUlkifQ.LK7CANARY", true},
+		{"email", "heyJoe.Smith.Jr@example.com", true},
+		{"email", "jöhn@exämple.com", false},
+		{"name", "José", false},
+	} {
+		t.Run(tc.claim+"/"+tc.key, func(t *testing.T) {
+			cfg := loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c", "BYWARD_OIDC_SUBJECT_CLAIM="+tc.claim)
+			withStore(t, cfg, func(st *sqlite.Store) {
+				g := grantFor("held", time.Now().Add(-time.Minute))
+				g.Subject = tc.key
+				if _, err := st.CreateGrant(context.Background(), g); err != nil {
+					t.Fatal(err)
+				}
+			})
+			var logs bytes.Buffer
+			user, _, err := RevokeUser(context.Background(), cfg, logging.New(&logs, "json"), tc.key)
+			if err != nil || user != tc.key {
+				t.Fatalf("RevokeUser = %q, %v; want the key revoked as given", user, err)
+			}
+			if !grantGone(t, cfg, "held") {
+				t.Fatal("the user's grant is still there")
+			}
+			var record map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var r map[string]any
+				if json.Unmarshal([]byte(line), &r) == nil && r["event"] == "grant_revoked" {
+					record = r
+				}
+			}
+			want := tc.key
+			if tc.redacted {
+				want = "[REDACTED]"
+			}
+			if record == nil || record["user_key"] != want {
+				t.Fatalf("audit record %v; want user_key %q", record, want)
+			}
+			if !tc.redacted {
+				return
+			}
+			for _, part := range strings.FieldsFunc(tc.key, func(r rune) bool { return r == ' ' || r == '.' || r == '@' }) {
+				if len(part) >= 4 && strings.Contains(logs.String(), part) {
+					t.Errorf("the log holds %q, part of the key: %s", part, logs.String())
+				}
+			}
+		})
 	}
 }
