@@ -152,7 +152,7 @@ func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
 		// or any other port names no host, and is refused, as is a shape CutHostname takes that names
 		// no listed host or address (an empty host before a port, [not an address:]).
 		"[::1]": http.StatusNoContent, "::1": http.StatusNoContent, "127.0.0.1:": http.StatusNoContent,
-		// An IPv6 address with a zone, which no client sends (#652); without it, the address passes.
+		// An IPv6 address with a zone, which a client strips before it sends Host (#652); without it, the address passes.
 		"[fe80::1%eth0]:9090": http.StatusMisdirectedRequest, "[fe80::1%25eth0]:9090": http.StatusMisdirectedRequest, "[fe80::1]:9090": http.StatusNoContent,
 		"127.0.0.1:65535": http.StatusNoContent, "byward-metrics.monitoring.svc:10250": http.StatusNoContent,
 		"[byward-metrics.monitoring.svc]:9090": http.StatusMisdirectedRequest, "[mcp.example.com]:443": http.StatusMisdirectedRequest,
