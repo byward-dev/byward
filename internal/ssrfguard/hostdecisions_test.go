@@ -1,27 +1,35 @@
 package ssrfguard
 
 import (
-	"net/url"
+	"context"
+	"errors"
+	"net"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/testutil/hostfamilies"
 )
 
-// The guard's URL rule, checked before any dial, decides every host family as pinned in
-// testdata/hostdecisions.golden, and passes only the URLs in testdata/hostdecisions.allowed, so a
-// guard that would fetch a new form fails by name (#656). The dial's address check is not a host
-// form's: it is ssrfguard's own tests'.
+// The guard's URL rule, which Get checks before any dial, decides every host family as pinned in
+// testdata/hostdecisions.golden, and lets only the URLs in testdata/hostdecisions.allowed reach the
+// dial, so a guard that would fetch a new form fails by name (#656). The dial is a test hook that
+// records it was reached and dials nothing; the address check at dial is ssrfguard's own tests'.
 func TestTheGuardsURLRuleDecidesEveryHostFamilyAsPinned(t *testing.T) {
+	var reached bool
+	f := New(Config{Dial: func(context.Context, string, string) (net.Conn, error) {
+		reached = true
+		return nil, errors.New("not dialled")
+	}})
 	hostfamilies.Run(t, "internal/ssrfguard", []hostfamilies.Column{
 		{Name: "SSRF guard URL", Probes: hostfamilies.URLProbes("/jwks.json", "https", "http"), Judge: func(in string) (bool, string) {
-			u, err := url.Parse(in)
+			reached = false
+			_, err := f.Get(context.Background(), in, 1)
 			switch {
-			case err != nil:
-				return false, "not a URL"
-			case !Fetchable(u):
-				return false, "not an https URL on port 443"
+			case reached:
+				return true, ""
+			case errors.Is(err, ErrRefused):
+				return false, "refused before the dial"
 			}
-			return true, ""
+			return false, "not dialled"
 		}},
 	})
 }

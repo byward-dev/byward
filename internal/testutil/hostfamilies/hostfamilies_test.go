@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -69,7 +71,8 @@ func TestEachFamilyHasDistinctInputs(t *testing.T) {
 	}
 }
 
-// recorder is a testing.TB that keeps what a check reports instead of failing.
+// recorder is a testing.TB that keeps what a check reports instead of failing. Fatalf ends the
+// goroutine, as testing does, so a check runs on its own goroutine (record).
 type recorder struct {
 	testing.TB
 	errs []string
@@ -79,7 +82,20 @@ func (r *recorder) Helper() {}
 func (r *recorder) Errorf(format string, a ...any) {
 	r.errs = append(r.errs, fmt.Sprintf(format, a...))
 }
-func (r *recorder) Fatalf(format string, a ...any) { r.Errorf(format, a...) }
+func (r *recorder) Fatalf(format string, a ...any) { r.Errorf(format, a...); runtime.Goexit() }
+
+// record runs check against a recorder on its own goroutine and returns what it reported.
+func record(t *testing.T, check func(testing.TB)) []string {
+	r := &recorder{TB: t}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		check(r)
+	}()
+	wg.Wait()
+	return r.errs
+}
 
 // The baseline check names each line that differs from the checks' decisions as a widening or a
 // narrowing, a denylist's the other way round, and the residual check each residual its check no
@@ -104,6 +120,8 @@ func TestTheBaselineNamesEachChangedDecisionAsAWideningOrANarrowing(t *testing.T
 		{"a denylist residual not stopped", nil, []string{deny + "\t\"a\"\t#1\twhy"}, nil, []string{deny + "\t\"a\""}, nil},
 		{"a residual without an issue number", nil, []string{host + "\t\"a\"\t#\twhy"}, nil, []string{host + "\t\"a\""}, []string{"hostdecisions.residuals: "}},
 		{"a residual without a why", nil, []string{host + "\t\"a\"\t#1\t "}, nil, []string{host + "\t\"a\""}, []string{"hostdecisions.residuals: "}},
+		{"a residual listed twice", nil, []string{host + "\t\"a\"\t#1\twhy", host + "\t\"a\"\t#1\twhy"}, nil, []string{host + "\t\"a\""}, []string{"hostdecisions.residuals lists public Host\t\"a\" twice"}},
+		{"an input quoted another way", []string{host + "\t\"\\x61\""}, nil, nil, nil, []string{"hostdecisions.allowed: \"public Host\\t\\\"\\\\x61\\\"\": the input must be quoted"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Chdir(t.TempDir())
@@ -126,11 +144,66 @@ func TestTheBaselineNamesEachChangedDecisionAsAWideningOrANarrowing(t *testing.T
 				}
 				return m
 			}
-			r := &recorder{TB: t}
-			checkBaseline(r, set(tc.given), map[string]bool{deny: true})
-			checkResiduals(r, set(tc.passes))
-			if len(r.errs) != len(tc.want) || !slices.EqualFunc(r.errs, tc.want, strings.HasPrefix) {
-				t.Errorf("reports:\n%s\nwant ones starting:\n%s", strings.Join(r.errs, "\n"), strings.Join(tc.want, "\n"))
+			errs := record(t, func(r testing.TB) {
+				checkBaseline(r, set(tc.given), map[string]bool{deny: true})
+				checkResiduals(r, set(tc.passes))
+			})
+			if len(errs) != len(tc.want) || !slices.EqualFunc(errs, tc.want, strings.HasPrefix) {
+				t.Errorf("reports:\n%s\nwant ones starting:\n%s", strings.Join(errs, "\n"), strings.Join(tc.want, "\n"))
+			}
+		})
+	}
+}
+
+// Run refuses a package whose columns are not the ones listed for it, or that has none listed, before
+// it judges anything, so a check missing from either list fails by name.
+func TestRunRefusesColumnsTheListDoesNotHold(t *testing.T) {
+	for _, tc := range []struct {
+		name, pkg string
+		cols      []Column
+	}{
+		{"a package with no columns listed", "internal/unlisted", nil},
+		{"a column the list lacks", "internal/broker", []Column{{Name: "consent Origin"}, {Name: "another"}}},
+		{"a listed column left out", "internal/broker", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := record(t, func(r testing.TB) { Run(r, tc.pkg, tc.cols) })
+			if len(errs) != 1 || !strings.HasPrefix(errs[0], tc.pkg+" runs the columns") {
+				t.Errorf("reports %q, want one starting %q", errs, tc.pkg+" runs the columns")
+			}
+		})
+	}
+}
+
+// Run reads a denylist's baseline as the inputs it stops: a residual is an input it should stop and
+// does not, checked against what it lets through, and an input it no longer stops is a widening.
+func TestRunReadsADenylistsBaselineAsTheInputsItStops(t *testing.T) {
+	for _, tc := range []struct {
+		name, allowed, residuals string
+		want                     []string
+	}{
+		{"a residual it lets through", "", "deny\t\"a\"\t#1\tshould be stopped\n", nil},
+		{"an input it no longer stops", "deny\t\"a\"\n", "", []string{"no longer denied (a widening): deny\t\"a\""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BYWARD_UPDATE_GOLDEN", "1")
+			t.Chdir(t.TempDir())
+			if err := os.Mkdir("testdata", 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for name, body := range map[string]string{"hostdecisions.allowed": "# header\n" + tc.allowed, "hostdecisions.residuals": "# header\n" + tc.residuals} {
+				if err := os.WriteFile(filepath.Join("testdata", name), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			columns["test/deny"] = []string{"deny"}
+			defer delete(columns, "test/deny")
+			errs := record(t, func(r testing.TB) {
+				Run(r, "test/deny", []Column{{Name: "deny", Denies: true, Probes: []Probe{{Family: "f", Wrap: "w", Port: "none", Input: "a"}},
+					Judge: func(string) (bool, string) { return true, "" }}})
+			})
+			if len(errs) != len(tc.want) || !slices.EqualFunc(errs, tc.want, strings.HasPrefix) {
+				t.Errorf("reports %q, want ones starting %q", errs, tc.want)
 			}
 		})
 	}

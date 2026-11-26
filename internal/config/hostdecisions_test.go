@@ -15,12 +15,12 @@ func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
 	// An empty value is never parsed: it is the setting's empty meaning (unset, its default, or off
 	// for internal-listen), which every setting takes, as Load reads it. A URL setting's column
 	// records what its parser takes, the widest it decides: an http public URL or issuer on loopback
-	// also needs --dev, which Load checks after.
-	// setting is the column of the setting name, named name unless as gives another, over probes.
-	setting := func(name string, probes []hostfamilies.Probe, parse func(Value) error, as ...string) hostfamilies.Column {
-		col := name
-		if len(as) > 0 {
-			col = as[0]
+	// also needs --dev, which Load checks for the public URL and the oidc adapter for the issuer (the
+	// oidc columns).
+	// setting is the column of the setting name over probes, named col, or name when col is "".
+	setting := func(name, col string, probes []hostfamilies.Probe, parse func(Value) error) hostfamilies.Column {
+		if col == "" {
+			col = name
 		}
 		return hostfamilies.Column{Name: col, Probes: probes, Judge: func(in string) (bool, string) {
 			if in == "" {
@@ -41,8 +41,10 @@ func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
 	listen := func(want string) func(Value) error {
 		return func(v Value) error { _, err := parseListen(v, want); return err }
 	}
-	// noAuth is the --insecure-no-auth fence on one setting, which Load decides (checkNoAuth): the
-	// whole configuration loads with the probe in that setting, the rest loopback.
+	// noAuth is the --insecure-no-auth fence on one setting, outside a container, which Load decides
+	// (checkNoAuth); listen's 127.0.0.1:9090 is refused for being internal-listen's default, not by the
+	// fence. The whole configuration loads with the probe in that setting, the rest as loadAnon sets
+	// them.
 	noAuth := func(name string, probes []hostfamilies.Probe) hostfamilies.Column {
 		return hostfamilies.Column{Name: "no-auth " + name, Probes: probes, Judge: func(in string) (bool, string) {
 			if _, err := loadAnon(t, nil, Setting{Name: name}.Env()+"="+in); err != nil {
@@ -54,20 +56,21 @@ func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
 	https, both := hostfamilies.URLProbes("/mcp", "https"), hostfamilies.URLProbes("/mcp", "https", "http")
 	hosts := hostfamilies.HostProbes()
 	hostfamilies.Run(t, "internal/config", []hostfamilies.Column{
-		setting("public-url", both, func(v Value) error { _, err := parsePublicURL(v); return err }),
-		setting("upstream-url", both, func(v Value) error { _, err := parseUpstreamURL(v); return err }),
-		setting("resource-documentation", https, single(parseResourceDocumentation)),
-		setting("oidc-issuer", both, single(parseIssuer)),
-		setting("allowed-origins", hostfamilies.URLProbes("", "https", "http"), list(parseOrigins)),
-		setting("allowed-hosts", hosts, list(parseAllowedHosts)),
-		setting("cimd-trusted-hosts", hosts, list(parseCIMDHosts)),
-		setting("cimd-allowed-hosts", hosts, list(parseCIMDHosts)),
-		setting("client-denylist", hosts, list(parseClientDenylist), "client-denylist host"),
+		setting("public-url", "", both, func(v Value) error { _, err := parsePublicURL(v); return err }),
+		setting("upstream-url", "", both, func(v Value) error { _, err := parseUpstreamURL(v); return err }),
+		setting("resource-documentation", "", https, single(parseResourceDocumentation)),
+		setting("oidc-issuer", "", both, single(parseIssuer)),
+		setting("allowed-origins", "", hostfamilies.URLProbes("", "https", "http"), list(parseOrigins)),
+		setting("allowed-hosts", "", hosts, list(parseAllowedHosts)),
+		setting("cimd-trusted-hosts", "", hosts, list(parseCIMDHosts)),
+		setting("cimd-allowed-hosts", "", hosts, list(parseCIMDHosts)),
+		setting("client-denylist", "client-denylist host", hosts, list(parseClientDenylist)),
 		// Config refuses only a client ID that can carry a credential, or a zone; registration's
-		// "denylist entry" column judges the rest of the URL.
-		setting("client-denylist", hostfamilies.Only(hostfamilies.URLProbes("/client.json", "https"), "url shape", "zone"), list(parseClientDenylist), "client-denylist client ID"),
-		setting("listen", hosts, listen("host:port such as 127.0.0.1:8080")),
-		setting("internal-listen", hosts, listen("host:port such as 127.0.0.1:9090, or empty")),
+		// "denylist entry" column judges the rest of the URL. A new family whose members can carry a
+		// zone or a credential belongs in this filter too.
+		setting("client-denylist", "client-denylist client ID", hostfamilies.Only(hostfamilies.URLProbes("/client.json", "https"), "url shape", "zone"), list(parseClientDenylist)),
+		setting("listen", "", hosts, listen("host:port such as 127.0.0.1:8080")),
+		setting("internal-listen", "", hosts, listen("host:port such as 127.0.0.1:9090, or empty")),
 		noAuth("public-url", both),
 		noAuth("listen", hosts),
 		noAuth("allowed-hosts", hosts),

@@ -81,8 +81,9 @@ func hostRule(h string) string {
 // Regenerate with BYWARD_UPDATE_GOLDEN=1, and review the diff.
 func TestEachHostSettingReadsEachProbeSpellingAsPinned(t *testing.T) {
 	var b strings.Builder
-	b.WriteString("# How each host setting reads each probe spelling, with its refusal message (ADR-0032). The decision\n")
-	b.WriteString("# of every host check on every input family is in testdata/hostdecisions.golden (#656).\n")
+	b.WriteString("# How each host setting reads each probe spelling, with its refusal message (ADR-0032). Each host\n")
+	b.WriteString("# setting's decision on every input family is in testdata/hostdecisions.golden; the other host checks'\n")
+	b.WriteString("# are in their packages' (internal/testutil/hostfamilies lists them) (#656).\n")
 	for _, h := range hostProbes {
 		b.WriteString(hostRule(h))
 	}

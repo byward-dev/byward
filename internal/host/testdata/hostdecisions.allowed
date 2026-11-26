@@ -1,6 +1,6 @@
-# The inputs each host check in internal/host passes, one per line: the column, a tab, and the input as
-# Go quotes it
-# (#656). Edited by hand, never regenerated: an added line widens a check,
+# The inputs each host check in internal/host passes (#656), one per line: the column, a tab, and the input
+# as Go quotes it.
+# Edited by hand, never regenerated: an added line widens a check,
 # and the PR says why. The test names each line that differs from the checks' decisions.
 loopback as written	"0:0::1"
 loopback as written	"127.0.0.1"

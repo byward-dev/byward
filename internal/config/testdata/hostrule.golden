@@ -1,5 +1,6 @@
-# How each host setting reads each probe spelling, with its refusal message (ADR-0032). The decision
-# of every host check on every input family is in testdata/hostdecisions.golden (#656).
+# How each host setting reads each probe spelling, with its refusal message (ADR-0032). Each host
+# setting's decision on every input family is in testdata/hostdecisions.golden; the other host checks'
+# are in their packages' (internal/testutil/hostfamilies lists them) (#656).
 mcp.example.com
   public https: mcp.example.com
   public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
