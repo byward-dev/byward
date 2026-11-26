@@ -102,6 +102,7 @@ Sources: [Twelve-Factor](https://12factor.net/) · [K8s probes v1.37](https://ku
 - Testable without Docker via `internal/testutil` fakes and an injected clock?
 - New dependency: version, maintenance, Apache-2.0-compatible license, govulncheck clean? Builds on the last two Go releases?
 - Concepts and code added versus a solo-maintainer budget?
+- What is the smallest version that meets the acceptance criteria, and what is deferred? No setting or knob without a named need.
 - Which input class does it read, and which shared rule or parser does it reuse (`internal/host`, the setting shapes, a registry field)? Is the behaviour for unset, set to nothing and empty written on the issue?
 - Which registry walk or decision-golden column fails when a new caller skips the rule? A new rule gets a golden column or walk, not more examples.
 

@@ -67,6 +67,8 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
   goes to the PR's "Known residuals" with one line why, or is dropped: wording, an input no real
   client or operator sends, a new golden column or family with no production check behind it.
   The same-gap rule below still decides where class findings go.
+- **No new abstraction:** a sweep fix may not add an interface or abstraction with fewer than 3
+  callers. SOLID findings are fixed within that limit.
 - **Same gap elsewhere:** a finding that another setting, check or surface has the gap the PR fixes
   doesn't become a new per-instance issue. It goes into that class's golden or walk (#656, #657,
   #658), or into "Known gaps" in `docs/security-posture.md`. A class with no golden or walk
@@ -100,7 +102,6 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 - Never commit to `main`. Feature branch → PR (`gh pr create`) → squash merge.
 - Do not merge PRs or push to `main` yourself; the maintainer reviews and merges.
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
-- A PR body says `Closes #N` for every issue it finishes; the last part of a split closes its parent.
 - Disclose AI help with the `Co-Authored-By` trailer. Agents never add `Signed-off-by` (ADR-0023).
 - The full AI-assistance policy and the test policy are in `CONTRIBUTING.md`.
 

@@ -20,6 +20,8 @@ Infer the repo from `git remote -v` — `gh` does this automatically when run in
   their issues and ADRs; it is history and is not updated.
 - The triage labels exist on the repo; their strings are in `docs/agents/triage-labels.md`.
 - Use `CONTEXT.md` vocabulary in issue titles and bodies (see `docs/agents/domain.md`).
+- An issue body has a "Reuses" line (the existing rule, parser or fake it builds on, or "none
+  found" plus the search done) and a "Not in scope" line.
 
 ## When a skill says "publish to the issue tracker"
 

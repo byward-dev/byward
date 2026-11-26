@@ -8,6 +8,7 @@
 - [ ] `mise run check` passes (and `mise run test:integration` if integration-tested code changed)
 - [ ] New behaviour has tests next to the code; a bug fix has a regression test
 - [ ] Domain words follow `CONTEXT.md` (the upstream is the MCP server, never the IdP)
+- [ ] New packages, exported names, interfaces or settings are listed in the body, each with the search for an existing one
 
 ### Decisions (ADRs)
 

@@ -30,3 +30,13 @@ body:
     attributes:
       label: Relevant standards
       description: MCP spec sections, RFCs or IdP documentation, with links.
+  - type: textarea
+    id: reuses
+    attributes:
+      label: Reuses
+      description: The existing rule, parser or fake this builds on, or "none found" and where you searched.
+  - type: textarea
+    id: not-in-scope
+    attributes:
+      label: Not in scope
+      description: What this request leaves out.
