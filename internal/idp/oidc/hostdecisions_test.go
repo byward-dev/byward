@@ -11,7 +11,7 @@ import (
 // An endpoint an IdP's discovery document names is decided for every host family as pinned in
 // testdata/hostdecisions.golden, and passes only the inputs in testdata/hostdecisions.allowed, so a
 // discovery check that takes a new form fails by name (#656): with an https issuer, and in
-// development mode with a loopback http one, and with that issuer outside development mode.
+// development mode with a loopback http one; and the issuer as the adapter takes it.
 func TestEveryDiscoveredEndpointHostIsDecidedAsPinned(t *testing.T) {
 	judge := func(issuer string, dev bool) func(string) (bool, string) {
 		return func(in string) (bool, string) {
@@ -25,7 +25,14 @@ func TestEveryDiscoveredEndpointHostIsDecidedAsPinned(t *testing.T) {
 	hostfamilies.Run(t, "internal/idp/oidc", []hostfamilies.Column{
 		{Name: "IdP endpoint", Probes: endpoints, Judge: judge("https://idp.example.com/realms/a", false)},
 		{Name: "IdP endpoint, --dev", Probes: endpoints, Judge: judge("http://127.0.0.1:8080/realms/a", true)},
-		// A loopback http issuer without --dev: loopback http endpoints need development mode too.
-		{Name: "IdP endpoint, loopback issuer without --dev", Probes: endpoints, Judge: judge("http://127.0.0.1:8080/realms/a", false)},
+		// The issuer itself, as New takes it outside development mode: config's parseIssuer (column
+		// "oidc-issuer") refuses the other forms first, so this records the adapter's own scheme and
+		// loopback decision, which keeps an http loopback issuer to --dev.
+		{Name: "IdP issuer", Probes: hostfamilies.URLProbes("/realms/a", "https", "http"), Judge: func(in string) (bool, string) {
+			if _, err := New(Config{Issuer: in, ClientID: "c", RedirectURL: "https://mcp.example.com/callback/oidc"}); err != nil {
+				return false, strings.TrimPrefix(err.Error(), "oidc: issuer: "+logging.URL(in)+" ")
+			}
+			return true, ""
+		}},
 	})
 }

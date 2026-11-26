@@ -6,8 +6,10 @@
 // the baseline, so a widening is a reviewed edit to the baseline and a narrowing a reviewed deletion.
 // Not covered: the trusted proxies and X-Forwarded-For, which take IP addresses and prefixes (netip);
 // the class X identifiers no column judges, such as an assertion's aud, compared byte for byte; the access
-// gate's email and hosted domains, which compare an identity claim, not a host the proxy reads; and
-// the consent page's display of a client's site and its other-site warning. The package imports no
+// gate's email and hosted domains, which compare an identity claim, not a host the proxy reads; the
+// SSRF guard's dial-time address check and doctor's address hints, which judge resolved addresses;
+// doctor's TLS certificate name check, a warning on hosts config has already checked; and the consent
+// page's display of a client's site and its other-site warning. The package imports no
 // production package, so a package it judges (internal/host among them) can use it in its own tests.
 package hostfamilies
 
@@ -38,8 +40,8 @@ var columns = map[string][]string{
 	},
 	"internal/broker":       {"consent Origin"},
 	"internal/origin":       {"public Host", "internal Host", "Origin"},
-	"internal/registration": {"CIMD client ID", "CIMD allowed host", "CIMD trusted host", "denylist entry", "denylist client ID", "denylist redirect", "redirect URI", "loopback redirect"},
-	"internal/idp/oidc":     {"IdP endpoint", "IdP endpoint, --dev", "IdP endpoint, loopback issuer without --dev"},
+	"internal/registration": {"CIMD client ID", "CIMD allowed host", "CIMD trusted host", "denylist entry", "denylist client ID", "denylist redirect", "redirect URI", "loopback redirect", "consent redirect key"},
+	"internal/idp/oidc":     {"IdP endpoint", "IdP endpoint, --dev", "IdP issuer"},
 	"internal/ssrfguard":    {"SSRF guard URL"},
 	"internal/host":         {"loopback as written"},
 }
@@ -59,12 +61,17 @@ var hostBases = []struct {
 }{
 	{"name", []string{"mcp.example.com", "MCP.Example.COM", "app.example", "evil.example", "localhost", "LOCALHOST", "byward-metrics.monitoring.svc", "my_mcp", "single"}},
 	{"name edge", []string{"mcp.example.com.", "a..b", ".mcp.example.com", "-a.example", "a-.example", "mcp.10", "app.0x", "10.0.0.999", "localhost.", "*.example.com", "u@mcp.example.com", "a?b.example", "a b.example", "a%41.example", "S3CRET~tok", "*", ""}},
+	// Near misses of the hosts the columns' lists hold: a subdomain, a suffix without a dot, a prefix.
+	{"near miss", []string{"www.mcp.example.com", "sub.app.example", "evilmcp.example.com", "xapp.example", "mcp.example.com.evil.example", "sub.xn--bcher-kva.example"}},
 	{"idn", []string{"xn--bcher-kva.example", "bücher.example", "ｍｃｐ.example.com", "b%C3%BCcher.example", "faß.example", "faẞ.example"}},
 	{"ipv4", []string{"127.0.0.1", "127.0.0.2", "10.244.1.17", "0.0.0.0", "8.8.8.8"}},
 	{"ipv4 spelling", []string{"127.0.0.1.", "127.1", "0x7f.0.0.1", "0177.0.0.1", "2130706433", "010.0.0.1", "127.0.0.1.5", "4294967296"}},
 	{"ipv6", []string{"::1", "0:0::1", "2001:DB8::1", "2001:db8::1", "fd00::17", "fe80::1", "::"}},
 	{"ipv4-mapped", []string{"::ffff:127.0.0.1", "::FFFF:7f00:1", "::ffff:8.8.8.8"}},
-	{"zone", []string{"fe80::1%eth0", "fe80::1%25eth0", "fe80::1%", "fe80::1%25", "::1%lo0", "fe80::1%eth0]", "fe80::1%eth0:-1"}},
+	{"zone", []string{"fe80::1%eth0", "fe80::1%25eth0", "fe80::1%", "fe80::1%25", "::1%lo0", "fe80::1%eth0]", "fe80::1%eth0:-1",
+		"fe80::1%abcdefghijklmnop", "fe80::1%..", "fe80::1%a/b", "fe80::1%a "}}, // zones the listen settings refuse
+	// Characters no host shows: a zero-width space, a soft hyphen, a non-ASCII control.
+	{"invisible", []string{"a\u200bb.example", "a\u00adb.example", "a\u0080b.example", "evil\u00ad.example", "mcp.example.com\u200b"}},
 }
 
 // wraps place a host in a host[:port]: bare, in brackets, and the bracket forms no client writes.
@@ -118,9 +125,9 @@ func portName(p string) string {
 }
 
 // urlShapes are what a URL holds besides its host: case in the scheme, user information, a query, a
-// fragment (empty or not), a trailing slash, an empty host before a port, a missing or single "/", another scheme or none, an escaped
-// bracket, white space, a backslash, a zoned host (a URL writes a zone as %25) with a user, a query
-// or a port, and a path that looks like a zone.
+// fragment (empty or not), a trailing slash, an empty host before a port, a missing or single "/",
+// another scheme or none, an escaped bracket, white space, a backslash, a zoned host (a URL writes a
+// zone as %25) with a user, a query or a port, and a path that looks like a zone.
 var urlShapes = []struct{ name, url string }{
 	{"scheme in upper case", "HTTPS://mcp.example.com"},
 	{"user", "https://u@mcp.example.com"},
@@ -169,12 +176,12 @@ func URLProbes(path string, schemes ...string) []Probe {
 	return out
 }
 
-// Only is the probes of the named families, for a check that judges only those and leaves the rest
-// to another check, whose column judges them.
-func Only(probes []Probe, families ...string) []Probe {
+// Only is the probes keep keeps, for a check that judges only some forms and leaves the rest to
+// another check, whose column judges them.
+func Only(probes []Probe, keep func(Probe) bool) []Probe {
 	var out []Probe
 	for _, p := range probes {
-		if slices.Contains(families, p.Family) {
+		if keep(p) {
 			out = append(out, p)
 		}
 	}

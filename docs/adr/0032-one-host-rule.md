@@ -123,7 +123,7 @@ shape's refusal.
 _Amended 2026-11-26 (#656):_ the record of each rule's decisions is the host decision goldens: the
 checks that decide on a host name or a host[:port] (each URL and host setting here, the public and
 internal Host checks, the Origin check, the CIMD client ID, allow and trust checks, the client denylist,
-redirect URI validation and the loopback redirect match, the SSRF guard's URL rule, a discovered IdP
+redirect URI validation, the loopback redirect match and the remembered consent's redirect key, the SSRF guard's URL rule, a discovered IdP
 endpoint, what is read as loopback, the `--insecure-no-auth` loopback fence, and the consent page's
 Origin check), judged on generated input families. Each package that owns
 such a check keeps a summary by family, `testdata/hostdecisions.golden`, and the inputs each check
@@ -132,8 +132,10 @@ a widening is a reviewed line. What a check passes today but should not is liste
 `testdata/hostdecisions.residuals`. `internal/testutil/hostfamilies` lists the packages and their
 checks. Not covered: the trusted proxies and `X-Forwarded-For`, which take IP addresses and
 prefixes; the class X identifiers no column judges, such as an assertion's `aud`; the access gate's email and
-hosted domains, which compare an identity claim, not a host the proxy reads; and the consent page's
-display of a client's site and its other-site warning. The refusal messages stay in `internal/config/testdata/hostrule.golden`.
+hosted domains, which compare an identity claim, not a host the proxy reads; the SSRF guard's
+dial-time address check and doctor's address hints, which judge resolved addresses; doctor's TLS
+certificate name check, a warning on hosts config has already checked; and the consent page's display
+of a client's site and its other-site warning. The refusal messages stay in `internal/config/testdata/hostrule.golden`.
 
 | Class | Settings and comparisons | Rule |
 |---|---|---|

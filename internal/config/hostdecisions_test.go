@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/testutil/hostfamilies"
@@ -66,9 +67,11 @@ func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
 		setting("cimd-allowed-hosts", "", hosts, list(parseCIMDHosts)),
 		setting("client-denylist", "client-denylist host", hosts, list(parseClientDenylist)),
 		// Config refuses only a client ID that can carry a credential, or a zone; registration's
-		// "denylist entry" column judges the rest of the URL. A new family whose members can carry a
-		// zone or a credential belongs in this filter too.
-		setting("client-denylist", "client-denylist client ID", hostfamilies.Only(hostfamilies.URLProbes("/client.json", "https"), "url shape", "zone"), list(parseClientDenylist)),
+		// "denylist entry" column judges the rest of the URL. So this column judges every client ID
+		// that holds what a credential or a zone is written with, whatever its family.
+		setting("client-denylist", "client-denylist client ID", hostfamilies.Only(hostfamilies.URLProbes("/client.json", "https"), func(p hostfamilies.Probe) bool {
+			return p.Family == "url shape" || strings.ContainsAny(strings.TrimPrefix(p.Input, "https://"), "@?#%")
+		}), list(parseClientDenylist)),
 		setting("listen", "", hosts, listen("host:port such as 127.0.0.1:8080")),
 		setting("internal-listen", "", hosts, listen("host:port such as 127.0.0.1:9090, or empty")),
 		noAuth("public-url", both),

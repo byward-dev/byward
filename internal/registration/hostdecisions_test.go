@@ -20,9 +20,10 @@ func (selfDoc) Get(_ context.Context, url string, _ int64) (*ssrfguard.Response,
 }
 
 // The CIMD client ID rule, the CIMD allow and trust checks, the client denylist, redirect URI
-// validation and the loopback redirect match decide every host family as
-// pinned in testdata/hostdecisions.golden, and pass only the inputs in testdata/hostdecisions.allowed,
-// so a check that lets a new form through fails by name (#656). A client ID passes the registry when
+// validation, the loopback redirect match and the remembered consent's redirect key decide every
+// host family as pinned in testdata/hostdecisions.golden; testdata/hostdecisions.allowed holds the
+// inputs each passes (a denylist: the inputs it stops), so a check that lets a new form through fails
+// by name (#656). A client ID passes the registry when
 // it reaches the fetch: every check before it took it.
 func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
 	reaches := func(cfg CIMDConfig) func(string) (bool, string) {
@@ -75,9 +76,10 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 	hostfamilies.Run(t, "internal/registration", []hostfamilies.Column{
 		{Name: "CIMD client ID", Probes: ids, Judge: reaches(CIMDConfig{})},
 		{Name: "CIMD allowed host", Probes: ids, Judge: reaches(CIMDConfig{AllowedHosts: []string{"mcp.example.com", "app.example"}, TrustedHosts: []string{"xn--bcher-kva.example"}})},
-		// A client passes when the registry vouches for it (Verified), which only a trusted host's does.
+		// A client passes when the registry vouches for it (Verified), which only a trusted host's does:
+		// an allowed one, as production lists both, is not.
 		{Name: "CIMD trusted host", Probes: ids, Judge: func() func(string) (bool, string) {
-			r := NewCIMDRegistry(CIMDConfig{Fetch: selfDoc{}, Now: time.Now, TrustedHosts: []string{"xn--bcher-kva.example", "app.example"}})
+			r := NewCIMDRegistry(CIMDConfig{Fetch: selfDoc{}, Now: time.Now, TrustedHosts: []string{"xn--bcher-kva.example", "app.example"}, AllowedHosts: []string{"mcp.example.com"}})
 			return func(in string) (bool, string) {
 				c, err := r.Client(context.Background(), in)
 				if err != nil {
@@ -94,6 +96,8 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 			}
 			return err == nil, "refused" // the wiring refuses on any error
 		}},
+		// The token validator and the static-client check ask about any client ID, valid or not, so
+		// this column judges every one, not only those the CIMD rule keeps.
 		{Name: "denylist client ID", Probes: ids, Judge: func(in string) (bool, string) { return !clientIDs.DeniesClient(in), "denied" }, Denies: true},
 		// DCR asks the denylist only about the redirect URIs the redirect rule keeps (dcr.go), so only
 		// those can be stopped.
@@ -103,8 +107,14 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 		{Name: "redirect URI", Probes: redirectURIs, Judge: func(in string) (bool, string) { return redirectReason(ValidateRedirect(in)) }},
 		// A registered loopback redirect matches the same host, as written, on any port (ADR-0009 §2):
 		// one is registered, so a redirect to another loopback host is refused.
-		{Name: "loopback redirect", Probes: hostfamilies.URLProbes("/cb", "http"), Judge: func(in string) (bool, string) {
+		{Name: "loopback redirect", Probes: redirectURIs, Judge: func(in string) (bool, string) {
 			return redirectReason(MatchRedirect([]string{"http://127.0.0.1/cb"}, in))
+		}},
+		// A remembered consent compares redirect URIs by RedirectKey, which drops the port of an http
+		// loopback one only: a URI passes when its port is dropped, so a remembered consent covers it
+		// on another port.
+		{Name: "consent redirect key", Probes: redirectURIs, Judge: func(in string) (bool, string) {
+			return RedirectKey(in) != in, "compared as written"
 		}},
 	})
 }

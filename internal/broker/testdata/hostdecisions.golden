@@ -3,24 +3,26 @@
 # which is edited by hand; a denylist's lines there are the inputs it stops. A Go version that reads
 # a URL or an address differently changes these lines: that is a decision change too.
 
-## consent Origin: 1 pass, 13297 refused, of 13298
+## consent Origin: 1 pass, 16537 refused, of 16538
 by family:
   name                     pass     1  refused  1943
   name edge                pass     0  refused  3672
+  near miss                pass     0  refused  1296
   idn                      pass     0  refused  1296
   ipv4                     pass     0  refused  1080
   ipv4 spelling            pass     0  refused  1728
   ipv6                     pass     0  refused  1512
   ipv4-mapped              pass     0  refused   648
-  zone                     pass     0  refused  1400
+  zone                     pass     0  refused  2264
+  invisible                pass     0  refused  1080
   url shape                pass     0  refused    18
 by wrap:
-  bare                     pass     1  refused  2193
-  [h]                      pass     0  refused  2196
-  [h                       pass     0  refused  2194
-  h]                       pass     0  refused  2232
-  [h]]                     pass     0  refused  2232
-  [h]x                     pass     0  refused  2232
+  bare                     pass     1  refused  2733
+  [h]                      pass     0  refused  2736
+  [h                       pass     0  refused  2734
+  h]                       pass     0  refused  2772
+  [h]]                     pass     0  refused  2772
+  [h]x                     pass     0  refused  2772
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -40,24 +42,24 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass     1  refused   733
-  :                        pass     0  refused   738
-  :443                     pass     0  refused   738
-  :80                      pass     0  refused   738
-  :8080                    pass     0  refused   738
-  :9090                    pass     0  refused   738
-  :65535                   pass     0  refused   738
-  :0                       pass     0  refused   738
-  :65536                   pass     0  refused   738
-  :123456                  pass     0  refused   738
-  :080                     pass     0  refused   738
-  :+80                     pass     0  refused   738
-  :-1                      pass     0  refused   738
-  :0x50                    pass     0  refused   738
-  :8a                      pass     0  refused   738
-  :８０                      pass     0  refused   738
-  :80:80                   pass     0  refused   738
-  :80]                     pass     0  refused   738
+  none                     pass     1  refused   913
+  :                        pass     0  refused   918
+  :443                     pass     0  refused   918
+  :80                      pass     0  refused   918
+  :8080                    pass     0  refused   918
+  :9090                    pass     0  refused   918
+  :65535                   pass     0  refused   918
+  :0                       pass     0  refused   918
+  :65536                   pass     0  refused   918
+  :123456                  pass     0  refused   918
+  :080                     pass     0  refused   918
+  :+80                     pass     0  refused   918
+  :-1                      pass     0  refused   918
+  :0x50                    pass     0  refused   918
+  :8a                      pass     0  refused   918
+  :８０                      pass     0  refused   918
+  :80:80                   pass     0  refused   918
+  :80]                     pass     0  refused   918
   -                        pass     0  refused    18
 refused because:
-  13297  not the public URL's origin
+  16537  not the public URL's origin

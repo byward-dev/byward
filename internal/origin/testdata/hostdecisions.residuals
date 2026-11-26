@@ -30,6 +30,17 @@ internal Host	"[::1%lo0]:65536"	#652	a zoned IP literal: the internal listener t
 internal Host	"[::1%lo0]:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[::1%lo0]:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[::1%lo0]:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..:80]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:443"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:65535"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:65536"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%..]:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%25:80]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%25]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%25]:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
@@ -53,6 +64,39 @@ internal Host	"[fe80::1%25eth0]:80"	#652	a zoned IP literal: the internal listen
 internal Host	"[fe80::1%25eth0]:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%25eth0]:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%:80]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a :80]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:443"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:65535"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:65536"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a ]:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b:80]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:443"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:65535"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:65536"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%a/b]:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop:80]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:443"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:65535"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:65536"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"[fe80::1%abcdefghijklmnop]:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%eth0:-1:80]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%eth0:-1]"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%eth0:-1]:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
@@ -75,6 +119,23 @@ internal Host	"[fe80::1%eth0]:65536"	#652	a zoned IP literal: the internal liste
 internal Host	"[fe80::1%eth0]:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%eth0]:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"[fe80::1%eth0]:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%.."	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:+80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:-1"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:0x50"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:123456"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:443"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:65535"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:65536"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:80:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:8a"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%..:８０"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"fe80::1%25"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"fe80::1%25:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"fe80::1%25:+80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
@@ -125,6 +186,57 @@ internal Host	"fe80::1%:80:80"	#652	a zoned IP literal: the internal listener ta
 internal Host	"fe80::1%:8a"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"fe80::1%:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"fe80::1%:８０"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a "	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :+80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :-1"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :0x50"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :123456"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :443"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :65535"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :65536"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :80:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :8a"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a :８０"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:+80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:-1"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:0x50"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:123456"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:443"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:65535"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:65536"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:80:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:8a"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%a/b:８０"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:+80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:-1"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:0x50"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:123456"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:443"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:65535"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:65536"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:8080"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:80:80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:8a"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:9090"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
+internal Host	"fe80::1%abcdefghijklmnop:８０"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"fe80::1%eth0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"fe80::1%eth0:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"fe80::1%eth0:+80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all

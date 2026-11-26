@@ -118,8 +118,8 @@ func TestTheBaselineNamesEachChangedDecisionAsAWideningOrANarrowing(t *testing.T
 		{"a residual still let through", nil, []string{host + "\t\"a\"\t#1\twhy"}, nil, []string{host + "\t\"a\""}, nil},
 		{"a residual its issue fixed", nil, []string{host + "\t\"a\"\t#1\twhy"}, nil, nil, []string{"residual public Host\t\"a\" (#1): its check no longer lets it through"}},
 		{"a denylist residual not stopped", nil, []string{deny + "\t\"a\"\t#1\twhy"}, nil, []string{deny + "\t\"a\""}, nil},
-		{"a residual without an issue number", nil, []string{host + "\t\"a\"\t#\twhy"}, nil, []string{host + "\t\"a\""}, []string{"hostdecisions.residuals: "}},
-		{"a residual without a why", nil, []string{host + "\t\"a\"\t#1\t "}, nil, []string{host + "\t\"a\""}, []string{"hostdecisions.residuals: "}},
+		{"a residual without an issue number", nil, []string{host + "\t\"a\"\t#\twhy"}, nil, []string{host + "\t\"a\""}, []string{"hostdecisions.residuals: \"public Host\\t\\\"a\\\"\\t#\\twhy\": want column"}},
+		{"a residual without a why", nil, []string{host + "\t\"a\"\t#1\t "}, nil, []string{host + "\t\"a\""}, []string{"hostdecisions.residuals: \"public Host\\t\\\"a\\\"\\t#1\\t \": want column"}},
 		{"a residual listed twice", nil, []string{host + "\t\"a\"\t#1\twhy", host + "\t\"a\"\t#1\twhy"}, nil, []string{host + "\t\"a\""}, []string{"hostdecisions.residuals lists public Host\t\"a\" twice"}},
 		{"an input quoted another way", []string{host + "\t\"\\x61\""}, nil, nil, nil, []string{"hostdecisions.allowed: \"public Host\\t\\\"\\\\x61\\\"\": the input must be quoted"}},
 	} {
@@ -165,6 +165,7 @@ func TestRunRefusesColumnsTheListDoesNotHold(t *testing.T) {
 		{"a package with no columns listed", "internal/unlisted", nil},
 		{"a column the list lacks", "internal/broker", []Column{{Name: "consent Origin"}, {Name: "another"}}},
 		{"a listed column left out", "internal/broker", nil},
+		{"a column named otherwise", "internal/broker", []Column{{Name: "another"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			errs := record(t, func(r testing.TB) { Run(r, tc.pkg, tc.cols) })
