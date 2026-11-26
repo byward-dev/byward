@@ -7,7 +7,6 @@ package host
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -59,7 +58,7 @@ func DefaultPort(scheme string) string { return defaultPorts[scheme] }
 const NameChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._"
 
 // BadNameChar is the place of the first character of name that is not in NameChars, counted from
-// 1, or 0 when there is none, or when name is an IP address, whose IPv6 zone may hold a "%" that is
+// 1, or 0 when there is none, or when name is an IP address, whose ":" (and an IPv6 zone's "%") are
 // the address's, not a name's. Every character before it is ASCII, since a non-ASCII one is not in
 // NameChars, so the place is the same in bytes and in characters. It never returns the character,
 // which a secret may be.
@@ -98,19 +97,19 @@ func HasEdgeHyphen(name string) bool {
 // or refused, and an IPv6 address is written in its shortest form. A port that is scheme's default
 // is dropped. A trailing dot is kept: example.com. is not example.com (WHATWG URL §3.1).
 func Parse(hostport, scheme string) (Host, error) {
-	h, port, err := split(hostport)
+	h, port, err := Split(hostport)
 	if err != nil {
 		return Host{}, err
 	}
-	if port, err = parsePort(port); err != nil {
+	if port, err = parsePort(strings.TrimPrefix(port, ":")); err != nil {
 		return Host{}, err
 	}
 	if port == defaultPorts[scheme] {
 		port = ""
 	}
 	if strings.Contains(h, ":") {
-		a, err := netip.ParseAddr(h)
-		if err != nil || !a.Is6() || a.Zone() != "" {
+		a, ok := ParseIPv6(h)
+		if !ok {
 			return Host{}, ErrIPv6
 		}
 		return Host{Kind: IPv6, Canonical: Serialize(h), Addr: a, Port: port}, nil
@@ -141,22 +140,44 @@ func Parse(hostport, scheme string) (Host, error) {
 	return Host{Kind: Name, Canonical: name, Port: port}, nil
 }
 
-// split cuts hostport into its host (without brackets) and port.
-func split(hostport string) (h, port string, err error) {
+// ParseIPv6 reads h, a host without brackets, as an IPv6 address without a zone: the one IPv6 form a URL
+// or a Host header carries (WHATWG URL §3.1 omits zones).
+func ParseIPv6(h string) (netip.Addr, bool) {
+	a, err := netip.ParseAddr(h)
+	return a, err == nil && a.Is6() && a.Zone() == ""
+}
+
+// HasZone reports whether h, a host without brackets, is an IPv6 address with a zone, which no URL
+// carries (#644).
+func HasZone(h string) bool {
+	a, err := netip.ParseAddr(h)
+	return err == nil && a.Zone() != ""
+}
+
+// Split cuts hostport (host, host:port, [IPv6], [IPv6]:port, or a bare IPv6 address taken whole)
+// into its host, without brackets, and its port as written with its colon: ":443", ":" for a colon
+// with no port after it, or "" for none. It is the one bracket rule (#644): a hostport that starts
+// with "[" must close it around a host with a ":", followed by nothing or by a ":"; a "[" or "]" in a
+// hostport that does not start with "[" is ErrBrackets, and one with more than one ":" and no brackets
+// is a bare IPv6 address, taken whole with no port. What the brackets enclose and what follows the ":"
+// are not read: [not an address:] and [::1]:80] split, and the caller judges the host and the port.
+func Split(hostport string) (h, port string, err error) {
 	switch {
 	case strings.HasPrefix(hostport, "["):
 		inner, rest, ok := strings.Cut(hostport[1:], "]")
 		if !ok || (rest != "" && !strings.HasPrefix(rest, ":")) || !strings.Contains(inner, ":") {
 			return "", "", ErrBrackets
 		}
-		return inner, strings.TrimPrefix(rest, ":"), nil
+		return inner, rest, nil
 	case strings.ContainsAny(hostport, "[]"):
 		return "", "", ErrBrackets
 	case strings.Count(hostport, ":") > 1:
 		return hostport, "", nil
 	}
-	h, port, _ = strings.Cut(hostport, ":")
-	return h, port, nil
+	if i := strings.IndexByte(hostport, ':'); i >= 0 {
+		return hostport[:i], hostport[i:], nil
+	}
+	return hostport, "", nil
 }
 
 // parsePort is port in decimal without leading zeros, or "" for none.
@@ -237,14 +258,28 @@ func Origin(scheme, hostport string) string {
 	return scheme + "://" + h
 }
 
-// Hostname is hostport (host, host:port, [IPv6], [IPv6]:port or a bare IPv6 address) reduced to its
-// host name: no port, no brackets, in lower case.
-func Hostname(hostport string) string {
-	h := hostport
-	if name, _, err := net.SplitHostPort(h); err == nil {
-		h = name
+// CutHostname cuts hostport (host, host:port, [IPv6], [IPv6]:port or a bare IPv6 address) to its host
+// name, without port or brackets, in lower case, and reports whether hostport has one of those shapes
+// (#644): ok is false when Split refuses it or its port after the ":" is not up to 5 digits, as for
+// [::1]:80] and [mcp.example.com]:443. The name itself is not judged: "", ":80" and [not an address:]
+// give ok, and the caller decides whether the name is one it takes. The port is only shaped, not read:
+// parsePort and the URL settings' port rule judge a port's value; a Host header's port is the
+// listener's own, and RFC 3986 allows an empty one.
+func CutHostname(hostport string) (name string, ok bool) {
+	h, port, err := Split(hostport)
+	if digits := strings.TrimPrefix(port, ":"); err != nil || len(digits) > 5 || strings.Trim(digits, "0123456789") != "" {
+		return "", false
 	}
-	return strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"))
+	return strings.ToLower(h), true
+}
+
+// Hostname is hostport reduced to its host name (CutHostname), or, when hostport is in no shape
+// CutHostname takes, hostport lower-cased whole, as Canonical does a malformed one: for values config has checked already.
+func Hostname(hostport string) string {
+	if name, ok := CutHostname(hostport); ok {
+		return name
+	}
+	return strings.ToLower(hostport)
 }
 
 // Serialize is a host name (no port, no brackets) as browsers serialize it (WHATWG URL host
@@ -256,7 +291,7 @@ func Hostname(hostport string) string {
 func Serialize(host string) string {
 	host = strings.ToLower(host)
 	switch a, err := netip.ParseAddr(host); {
-	case err == nil && a.Zone() != "":
+	case HasZone(host):
 	case err == nil && a.Is4In6():
 		b := a.As16()
 		return fmt.Sprintf("[::ffff:%x:%x]", uint16(b[12])<<8|uint16(b[13]), uint16(b[14])<<8|uint16(b[15]))
@@ -275,21 +310,13 @@ func Serialize(host string) string {
 // (Go, Python) and one sent as a browser writes it (fetch; curl rewrites most spellings) compare
 // equal however it is spelled.
 func Canonical(hostport string) string {
-	host, port := hostport, ""
-	switch {
-	case strings.HasPrefix(hostport, "["):
-		inner, rest, ok := strings.Cut(hostport[1:], "]")
-		if !ok || (rest != "" && !strings.HasPrefix(rest, ":")) {
-			return strings.ToLower(hostport)
-		}
-		host, port = inner, rest
-		if a, err := netip.ParseAddr(inner); err != nil || !a.Is6() || a.Zone() != "" {
+	host, port, err := Split(hostport)
+	if err != nil {
+		return strings.ToLower(hostport) // brackets no browser writes, so only lower-cased
+	}
+	if strings.HasPrefix(hostport, "[") {
+		if _, ok := ParseIPv6(host); !ok {
 			return strings.ToLower(hostport) // no address a browser writes, so only lower-cased
-		}
-	case strings.Count(hostport, ":") > 1: // a bare IPv6 address, taken whole
-	default:
-		if h, p, ok := strings.Cut(hostport, ":"); ok {
-			host, port = h, ":"+p
 		}
 	}
 	return Serialize(host) + port

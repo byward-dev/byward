@@ -56,22 +56,51 @@ func TestCanonicalWritesAnAddressAsBrowsersDoAndAnyOtherHostInLowerCase(t *testi
 	}
 }
 
-// Hostname reduces a host[:port], a bracketed IPv6 address included, to its lower-case host name
-// (#319).
-func TestHostnameReducesAHostPortToItsLowerCaseHostName(t *testing.T) {
-	for hostport, want := range map[string]string{
-		"mcp.example.com":      "mcp.example.com",
-		"mcp.example.com:8443": "mcp.example.com",
-		"MCP.Example.COM:8443": "mcp.example.com",
-		"[::1]":                "::1",
-		"[::1]:8443":           "::1",
-		"::1":                  "::1",
-		"[FE80::1]:8443":       "fe80::1",
-		"127.0.0.1:8080":       "127.0.0.1",
-		"localhost":            "localhost",
+// CutHostname cuts a host[:port], a bracketed IPv6 address included, to its lower-case host name when
+// its port is up to 5 digits, empty included, whatever their value (#319, #644). Hostname gives that
+// name, or a value in no such shape lower-cased whole: a fallback that values config has already
+// checked never reach.
+func TestCutHostnameTakesAHostWhosePortIsUpToFiveDigitsAndHostnameLowerCasesAnyOtherWhole(t *testing.T) {
+	for _, tc := range []struct {
+		hostport, name string
+		ok             bool
+		hostname       string
+	}{
+		{"mcp.example.com", "mcp.example.com", true, "mcp.example.com"},
+		{"mcp.example.com:8443", "mcp.example.com", true, "mcp.example.com"},
+		{"MCP.Example.COM:8443", "mcp.example.com", true, "mcp.example.com"},
+		{"[::1]", "::1", true, "::1"},
+		{"[::1]:8443", "::1", true, "::1"},
+		{"::1", "::1", true, "::1"},
+		{"[FE80::1]:8443", "fe80::1", true, "fe80::1"},
+		{"127.0.0.1", "127.0.0.1", true, "127.0.0.1"},
+		{"127.0.0.1:8080", "127.0.0.1", true, "127.0.0.1"},
+		{"localhost", "localhost", true, "localhost"},
+		{"127.0.0.1:", "127.0.0.1", true, "127.0.0.1"},
+		{"127.0.0.1:65535", "127.0.0.1", true, "127.0.0.1"},
+		{"127.0.0.1:00000", "127.0.0.1", true, "127.0.0.1"},
+		// The shape is all that is read: a name that is none is the caller's to refuse.
+		{"", "", true, ""},
+		{":80", "", true, ""},
+		{"[not an address:]", "not an address:", true, "not an address:"},
+		// Not in one of those shapes: a port that is not up to 5 digits, or a bracket Split refuses.
+		{"127.0.0.1:123456", "", false, "127.0.0.1:123456"},
+		{"127.0.0.1:000080", "", false, "127.0.0.1:000080"},
+		{"127.0.0.1:+80", "", false, "127.0.0.1:+80"},
+		{"127.0.0.1:8a", "", false, "127.0.0.1:8a"},
+		{"127.0.0.1:HTTP", "", false, "127.0.0.1:http"},
+		{"[MCP.example.com]:443", "", false, "[mcp.example.com]:443"},
+		{"[::1]:80]", "", false, "[::1]:80]"},
+		{"[::1", "", false, "[::1"},
+		{"[MCP.Example.COM", "", false, "[mcp.example.com"},
+		{"::1]", "", false, "::1]"},
+		{"fe80::1%eth0]", "", false, "fe80::1%eth0]"},
 	} {
-		if got := Hostname(hostport); got != want {
-			t.Errorf("Hostname(%q) = %q, want %q", hostport, got, want)
+		if name, ok := CutHostname(tc.hostport); name != tc.name || ok != tc.ok {
+			t.Errorf("CutHostname(%q) = %q, %v, want %q, %v", tc.hostport, name, ok, tc.name, tc.ok)
+		}
+		if got := Hostname(tc.hostport); got != tc.hostname {
+			t.Errorf("Hostname(%q) = %q, want %q", tc.hostport, got, tc.hostname)
 		}
 	}
 }

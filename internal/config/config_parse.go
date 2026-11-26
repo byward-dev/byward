@@ -120,7 +120,8 @@ func parseResourceDocumentation(val Value) (string, error) {
 
 // ParseUpstreamURL validates the HTTP upstream's URL as the proxy reads BYWARD_UPSTREAM_URL, as
 // `byward init entra` also needs it: an absolute http(s) URL whose host name has letters, digits, - .
-// and _ only (nameCharReason, ADR-0032 §3); the rest of the host is left to Go's dialer.
+// and _ only (nameCharReason, ADR-0032 §3), and no IPv6 address with a zone (urlZoneReason); the rest
+// of the host is left to Go's dialer.
 // It names the setting by its variable: its caller (`byward init`) passes only the text.
 func ParseUpstreamURL(raw string) (*url.URL, error) {
 	return parseUpstreamURL(Value{Setting: lookup("upstream-url"), Given: NewOpaque(raw)})
@@ -171,9 +172,9 @@ func isEscape(s string) bool {
 // isDigits reports whether s is ASCII digits only, at least one: a port or a prefix length as written.
 func isDigits(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
 
-// parseHTTPURL parses raw as an absolute http(s) URL with a host, no user name or password, and a
-// port, if any, as isPortNumber takes it, or says why it is not one: fixed text completing "it …",
-// never url.Parse's error, which quotes the value.
+// parseHTTPURL parses raw as an absolute http(s) URL with a host that is no IPv6 address with a zone
+// (urlZoneReason), no user name or password, and a port, if any, as isPortNumber takes it, or says why
+// it is not one: fixed text completing "it …", never url.Parse's error, which quotes the value.
 // White space, control and invisible formatting characters are refused first: url.Parse accepts a
 // space or a non-ASCII control character in a path (#422), which no URL holds (RFC 3986 §2).
 func parseHTTPURL(raw string) (*url.URL, string) {
@@ -206,6 +207,8 @@ func urlReason(raw string, u *url.URL, err error) string {
 		return "has no host"
 	case u.Hostname() == "": // http://:9000/mcp: a port alone, which a dialer reads as this host (#614)
 		return "has no host before its port"
+	case host.HasZone(u.Hostname()):
+		return urlZoneReason
 	case u.User != nil:
 		return "holds a user name or password"
 	case (u.Port() != "" || strings.HasSuffix(u.Host, ":")) && !isPortNumber(u.Port()):
@@ -213,6 +216,13 @@ func urlReason(raw string, u *url.URL, err error) string {
 	}
 	return ""
 }
+
+// urlZoneReason is why a URL setting is refused for an IPv6 zone (#644): a URL cannot carry one (WHATWG
+// URL §3.1 omits zones), so a browser or MCP client following the public URL, the resource documentation
+// or the issuer could not use it, and no browser sends an allowed origin with one; the upstream URL and a
+// CIMD client ID on the client denylist (denylistReason) are held to the same rule. The listen
+// addresses take a zone that names an interface (zoneReason).
+const urlZoneReason = "has an IPv6 zone, which a URL cannot carry; give the address without its %zone"
 
 // isPortNumber reports whether port is a TCP port as a URL may write it: 1 to 65535, no sign, no
 // leading zero (#602). url.Parse checks only that a port is digits, so :0, :08080 and :99999 parse.
@@ -456,40 +466,27 @@ func hostPort(h string) (stored, reason string) {
 	if strings.ContainsAny(h, "/ ") {
 		return "", `holds a "/" or a space; ` + hostPortForms
 	}
-	stored, v6, port, isV6, hasPort := h, "", "", false, false
-	switch {
-	case strings.HasPrefix(h, "["):
-		inner, rest, ok := strings.Cut(h[1:], "]")
-		if !ok || (rest != "" && !strings.HasPrefix(rest, ":")) || !strings.Contains(inner, ":") {
-			return "", bracketsReason + "; " + hostPortForms
-		}
-		v6, isV6, port, hasPort = inner, true, strings.TrimPrefix(rest, ":"), rest != ""
-	case strings.ContainsAny(h, "[]"):
+	name, p, err := host.Split(h) // the one bracket rule (#644)
+	if err != nil {
 		return "", bracketsReason + "; " + hostPortForms
-	case strings.Count(h, ":") > 1:
-		v6, isV6, stored = h, true, "["+h+"]"
+	}
+	switch {
+	case strings.Contains(name, ":"): // an IPv6 address, in brackets or bare
+		if _, ok := host.ParseIPv6(name); !ok {
+			return "", ipv6Reason + "; " + hostPortForms
+		}
 	default:
-		name, p, ok := strings.Cut(h, ":")
 		if name == "" {
 			return "", `has no host before its ":"; ` + hostPortForms
 		}
 		if reason := nameReason(name); reason != "" {
 			return "", reason
 		}
-		port, hasPort = p, ok
 	}
-	if isV6 {
-		ip, err := netip.ParseAddr(v6)
-		if err != nil || !ip.Is6() || ip.Zone() != "" {
-			return "", ipv6Reason + "; " + hostPortForms
-		}
+	if p != "" && !isPortNumber(strings.TrimPrefix(p, ":")) {
+		return "", portReason
 	}
-	if hasPort {
-		if !isPortNumber(port) {
-			return "", portReason
-		}
-	}
-	return host.Canonical(stored), ""
+	return host.Serialize(name) + p, ""
 }
 
 // parseAllowedHosts reads BYWARD_ALLOWED_HOSTS (#323, #325): each entry as hostPort stores it,

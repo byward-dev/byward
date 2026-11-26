@@ -199,10 +199,8 @@ func TestParseUpstreamURLTakesAnHTTPURLAndRequiresOne(t *testing.T) {
 		"http://u:9000/mcp%20X":         "u:9000",
 		"http://[2001:db8::1]:9000/mcp": "[2001:db8::1]:9000",
 		"https://up.example/m%C3%A9":    "up.example",
-		// "_" is a host name character (ADR-0032 §3), as a Compose service name holds it, and an IPv6
-		// zone's "%" is the address's, not a name's.
-		"http://my_mcp:8000/mcp":           "my_mcp:8000",
-		"http://[fe80::1%25eth0]:9000/mcp": "[fe80::1%eth0]:9000",
+		// "_" is a host name character (ADR-0032 §3), as a Compose service name holds it.
+		"http://my_mcp:8000/mcp": "my_mcp:8000",
 	} {
 		u, err := ParseUpstreamURL(raw)
 		if err != nil {
@@ -212,11 +210,6 @@ func TestParseUpstreamURLTakesAnHTTPURLAndRequiresOne(t *testing.T) {
 		if u.Host != host || u.String() != raw {
 			t.Errorf("ParseUpstreamURL(%q) = %v; want it taken as given, with the host %s", raw, u, host)
 		}
-	}
-	// An IPv6 zone is the address's, so a non-ASCII interface name passes the host name rule; url.String
-	// re-escapes it, so only the host is compared.
-	if u, err := ParseUpstreamURL("http://[fe80::1%25ü]:9000/mcp"); err != nil || u.Host != "[fe80::1%ü]:9000" {
-		t.Errorf("an upstream with a non-ASCII IPv6 zone: %v, %v; want it taken, with the host [fe80::1%%ü]:9000", u, err)
 	}
 	// An empty host before a port is refused by the URL rule before the host name rule reads it (#614).
 	if _, err := ParseUpstreamURL("http://:9000/mcp"); err == nil || err.Error() != "BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (16 characters, not shown): it has no host before its port" {
@@ -242,6 +235,7 @@ func TestAURLRefusedForItsFormSaysWhichPartIsWrong(t *testing.T) {
 		badPort    = "it has a port that is not a number"
 		brackets   = "it has brackets that do not enclose an IPv6 address alone"
 		userInfo   = "it holds a user name or password"
+		zone       = "it has an IPv6 zone, which a URL cannot carry; give the address without its %zone"
 	)
 	for _, tc := range []struct{ name, raw, why string }{
 		// What url.Parse lets through, or would refuse with its own error first.
@@ -291,6 +285,14 @@ func TestAURLRefusedForItsFormSaysWhichPartIsWrong(t *testing.T) {
 		{"a port with no host", "http://:9000/mcp", "it has no host before its port"},
 		{"a colon with no host or port", "http://:/mcp", "it has no host before its port"},
 		{"a user name and a port with no host", "http://u:pw@:9000/mcp", "it has no host before its port"},
+		// A zone is told after the host and before the user info and the port, whatever the interface
+		// name; only an IPv6 address has one, and a "%" an escape puts in a host name is the host name
+		// rule's (#644).
+		{"an IPv6 zone", "http://[fe80::1%25eth0]:9000/mcp", zone},
+		{"an IPv6 zone naming a non-ASCII interface", "http://[fe80::1%25ü]:9000/mcp", zone},
+		{"an IPv6 zone and port 0", "http://[fe80::1%25eth0]:0/mcp", zone},
+		{"a user name and an IPv6 zone", "http://u@[fe80::1%25eth0]:9000/mcp", zone},
+		{"an escaped percent sign in a host name", "http://a%25b:9000/mcp", "its host has a character no host name holds at position 2; a host name has only letters, digits, - . and _"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			want := fmt.Sprintf("BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (%d characters, not shown): %s", utf8.RuneCountInString(tc.raw), tc.why)

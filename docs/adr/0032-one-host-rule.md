@@ -1,6 +1,6 @@
 # ADR-0032: One host rule
 
-- Status: Accepted; amended 2026-11-21 (#521), 2026-11-26 (#524)
+- Status: Accepted; amended 2026-11-21 (#521), 2026-11-26 (#524), 2026-11-26 (#644)
 - Date: 2026-11-19
 - Issue: #520 (tracker #486); amends ADR-0018 §1–2, ADR-0020 §4 and ADR-0008 §4, §8–9
 
@@ -150,8 +150,18 @@ as written. A silent rewrite would publish something the operator did not regist
 sides. `010.0.0.1` read as `8.0.0.1` is not obvious to an operator, so it is refused, not guessed.
 
 **The internal listener** keeps ADR-0018's rule (its 2026-11-06 amendment of §2): any IP literal,
-`localhost` and the `BYWARD_ALLOWED_HOSTS` names, port ignored. Its `Host` header is parsed as
-class B, so those names are compared in canonical form.
+`localhost` and the `BYWARD_ALLOWED_HOSTS` names, on any port of up to 5 digits. Its `Host` header
+is parsed as class B, so those names are compared in canonical form.
+
+_Amended 2026-11-26 (#644):_ the five URL settings (the public URL, the upstream URL, the resource
+documentation, the OIDC issuer and the allowed origins) refuse an IPv6 zone with one reason, as WHATWG
+URL §3.1's "Support for <zone_id> is intentionally omitted" says a URL cannot carry one; the upstream
+URL, the resource documentation and the OIDC issuer took one before. A CIMD client ID on the client
+denylist (#524) is refused for a zone with the same reason. `host.Split` is the one bracket rule,
+which `host.Parse`, `host.Canonical`, `host.Hostname` and the config's host:port check share. The
+internal listener reads its `Host` header through it, so a header that names no host (a bracketed
+name or IPv4 address, a stray or unclosed bracket, text after an IPv6 address's port, or a port that
+is not up to 5 digits) gets 421, where some of these passed before.
 
 ### 3. One set of host-name characters
 

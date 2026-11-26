@@ -1,6 +1,7 @@
 package host
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -237,6 +238,104 @@ func TestOriginIsTheCanonicalHostWithoutTheSchemesOwnDefaultPortOnly(t *testing.
 	} {
 		if got := Origin(tc.scheme, tc.hostport); got != tc.want {
 			t.Errorf("Origin(%q, %q) = %q, want %q", tc.scheme, tc.hostport, got, tc.want)
+		}
+	}
+}
+
+// A host[:port] with a stray bracket, one that is not a leading pair around an IPv6 address, is no
+// host a browser sends: Canonical lower-cases it whole, as it does a malformed [IPv6], and reads
+// no address in it (#644). These are the 24 of 15,081 probe inputs where main's looser copy of the bracket rule
+// read the part before the first ":" instead; no decision on them changed (origin's
+// TestAHostOrOriginWithAStrayBracketIsRefusedByEveryCheck).
+var strayBracketHosts = map[string]string{
+	"127.1:443]":           "127.1:443]",
+	"127.1:8080]":          "127.1:8080]",
+	"2130706433:8080]":     "2130706433:8080]",
+	"0x7f.0.0.1:8080]":     "0x7f.0.0.1:8080]",
+	"0177.0.0.1:8080]":     "0177.0.0.1:8080]",
+	"127.1:9090]":          "127.1:9090]",
+	"HTTPS://APP.EXAMPLE]": "https://app.example]",
+	"https://APP.Example]": "https://app.example]",
+	"https://APP.example]": "https://app.example]",
+	"Origin %q: got %d, Access-Control-Allow-Origin %q; want it echoed as sent]":       "origin %q: got %d, access-control-allow-origin %q; want it echoed as sent]",
+	"BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp]":                                   "byward_public_url=https://mcp.example.com/mcp]",
+	"BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp]":                               "byward_public_url=https://b%c3%bccher.example/mcp]",
+	"BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF]":                                   "byward_allowed_origins=https://192.168.0.0xff]",
+	"(12 CHARACTERS, NOT SHOWN): IT HAS A \"[\" IN ITS HOST WITHOUT ITS \"]\"":         "(12 characters, not shown): it has a \"[\" in its host without its \"]\"",
+	"(18 characters, not shown): it has a control character, which a URL cannot hold]": "(18 characters, not shown): it has a control character, which a url cannot hold]",
+	"(10 characters, not shown): it is not an IPv6 address without a zone; ]":          "(10 characters, not shown): it is not an ipv6 address without a zone; ]",
+	"(19 characters, not shown): it is not an IPv6 address without a zone; ]":          "(19 characters, not shown): it is not an ipv6 address without a zone; ]",
+	"(12 characters, not shown): it is not an IPv6 address without a zone; ]":          "(12 characters, not shown): it is not an ipv6 address without a zone; ]",
+	"(5 characters, not shown): it is not an IPv6 address without a zone; ]":           "(5 characters, not shown): it is not an ipv6 address without a zone; ]",
+	"HTTPS://XN--BCHER-KVA.example]":                                                   "https://xn--bcher-kva.example]",
+	"without dev: want error pointing at the _FILE variable, got %v]":                  "without dev: want error pointing at the _file variable, got %v]",
+	" (14 characters, not shown): it is neither a CIDR nor an IP address]":             " (14 characters, not shown): it is neither a cidr nor an ip address]",
+	" (8 characters, not shown): its address, before the \"/\", is not an IP address]": " (8 characters, not shown): its address, before the \"/\", is not an ip address]",
+	"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read]":                         "byward_obo_scopes=https://graph.microsoft.com/user.read]",
+}
+
+func TestCanonicalLowerCasesAHostWithAStrayBracketWhole(t *testing.T) {
+	for in, want := range strayBracketHosts {
+		if got := Canonical(in); got != want {
+			t.Errorf("Canonical(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestHasZoneFindsAZoneOnlyInAnIPv6Address(t *testing.T) {
+	for h, want := range map[string]bool{
+		"fe80::1%eth0": true, "FE80::1%25": true,
+		"::1": false, "a%b": false, "a%25b": false, "127.0.0.1": false, "mcp.example.com": false, "[fe80::1%eth0]": false, "": false,
+	} {
+		if got := HasZone(h); got != want {
+			t.Errorf("HasZone(%q) = %v, want %v", h, got, want)
+		}
+	}
+}
+
+func TestParseIPv6TakesAnIPv6AddressWithoutAZoneOnly(t *testing.T) {
+	for h, want := range map[string]bool{
+		"::1": true, "FE80::1": true, "::ffff:127.0.0.1": true,
+		"fe80::1%eth0": false, "127.0.0.1": false, "mcp.example.com": false, "[::1]": false, "": false,
+	} {
+		if _, ok := ParseIPv6(h); ok != want {
+			t.Errorf("ParseIPv6(%q) ok = %v, want %v", h, ok, want)
+		}
+	}
+}
+
+// Split is the one bracket rule (#644): brackets come first and enclose a host with a ":", then nothing
+// or a ":" and whatever follows; the port comes back as written, with its colon, so a colon with no
+// port after it is told from none. A bare IPv6 address is taken whole. It reads neither the address
+// nor the port, which its callers judge.
+func TestSplitCutsAHostPortByTheOneBracketRule(t *testing.T) {
+	for _, tc := range []struct {
+		in, host, port string
+		err            error
+	}{
+		{"mcp.example.com", "mcp.example.com", "", nil},
+		{"mcp.example.com:443", "mcp.example.com", ":443", nil},
+		{"mcp.example.com:", "mcp.example.com", ":", nil},
+		{":80", "", ":80", nil},
+		{"[::1]", "::1", "", nil},
+		{"[::1]:8080", "::1", ":8080", nil},
+		{"[::1]:", "::1", ":", nil},
+		{"[fe80::1%eth0]:80", "fe80::1%eth0", ":80", nil},
+		{"::1", "::1", "", nil},
+		{"2001:db8::1", "2001:db8::1", "", nil},
+		{"[not an address:]", "not an address:", "", nil}, // brackets around something with a ":": its callers judge it
+		{"[::1]:80]", "::1", ":80]", nil},                 // the port is not read: its callers judge it
+		{"[a:[b]", "a:[b", "", nil},                       // a second "[" inside is the host's: its callers judge it
+		{"[127.0.0.1]", "", "", ErrBrackets},
+		{"[::1]x", "", "", ErrBrackets},
+		{"[::1", "", "", ErrBrackets},
+		{"::1]", "", "", ErrBrackets},
+		{"a[b", "", "", ErrBrackets},
+		{"127.1:443]", "", "", ErrBrackets},
+	} {
+		h, port, err := Split(tc.in)
+		if h != tc.host || port != tc.port || !errors.Is(err, tc.err) {
+			t.Errorf("Split(%q) = %q, %q, %v; want %q, %q, %v", tc.in, h, port, err, tc.host, tc.port, tc.err)
 		}
 	}
 }

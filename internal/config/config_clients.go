@@ -75,8 +75,8 @@ func denylistReason(e string) string {
 		switch u, err := url.Parse(e); {
 		case err == nil && u.User != nil:
 			return "is a CIMD client ID with a user name or password"
-		case err == nil && hasZone(u.Hostname()):
-			return zoneInURLReason
+		case err == nil && host.HasZone(u.Hostname()):
+			return urlZoneReason
 		case strings.ContainsAny(e, "?#"):
 			return "is a CIMD client ID with a query or a fragment"
 		case err != nil && strings.Contains(e, "@"):
@@ -86,16 +86,6 @@ func denylistReason(e string) string {
 	}
 	// A trailing dot names the same host; host.BrowserName folds it away.
 	return hostNameReason(strings.TrimSuffix(e, ".")) // neither a CIMD client ID nor a host name, or an address
-}
-
-// zoneInURLReason is why a URL entry is refused for an IPv6 zone, which a URL cannot carry (#644). It
-// is #650's urlZoneReason, under its own name until both have merged.
-const zoneInURLReason = "has an IPv6 zone, which a URL cannot carry; give the address without its %zone"
-
-// hasZone reports whether h, a host without brackets, is an IPv6 address with a zone.
-func hasZone(h string) bool {
-	a, err := netip.ParseAddr(h)
-	return err == nil && a.Zone() != ""
 }
 
 // parseCIMDHosts reads a CIMD host list (cimd-trusted-hosts, cimd-allowed-hosts): host names, in

@@ -131,7 +131,7 @@ func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
 		"[fd00::17]":                         http.StatusNoContent,
 		"localhost:9090":                     http.StatusNoContent,
 		"LOCALHOST":                          http.StatusNoContent,
-		"byward-metrics.monitoring.svc:9090": http.StatusNoContent, // listed name, any port
+		"byward-metrics.monitoring.svc:9090": http.StatusNoContent, // listed name, any port of up to 5 digits
 		"127.1:9090":                         http.StatusNoContent, // an IP literal in any spelling
 		"2130706433":                         http.StatusNoContent,
 		"rebind.attacker.example:9090":       http.StatusMisdirectedRequest,
@@ -139,7 +139,7 @@ func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
 		"127.0.0.1.nip.io:9090":              http.StatusMisdirectedRequest,
 		"":                                   http.StatusMisdirectedRequest,
 		// The internal listener's rule (ADR-0018 §2): any IP address in any spelling, localhost, and a
-		// listed name in any case on any port (so :080 too); a full-width name, a trailing dot, a name
+		// listed name in any case on any port of up to 5 digits (so :080 too); a full-width name, a trailing dot, a name
 		// ending in a number and a non-ASCII name are refused.
 		"BYWARD-METRICS.monitoring.svc":  http.StatusNoContent,
 		"localhost:080":                  http.StatusNoContent,
@@ -147,14 +147,93 @@ func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
 		"byward-metrics.monitoring.svc.": http.StatusMisdirectedRequest,
 		"mcp.10":                         http.StatusMisdirectedRequest,
 		"bÿward-metrics.monitoring.svc":  http.StatusMisdirectedRequest,
+		// The host is read from the Host header as a client writes it (#644): a port of up to 5 digits,
+		// or none after the ":", passes; a bracketed name or IPv4 address, an unclosed or stray bracket,
+		// or any other port names no host, and is refused, as is a shape CutHostname takes that names
+		// no listed host or address (an empty host before a port, [not an address:]).
+		"[::1]": http.StatusNoContent, "::1": http.StatusNoContent, "127.0.0.1:": http.StatusNoContent,
+		"127.0.0.1:65535": http.StatusNoContent, "byward-metrics.monitoring.svc:10250": http.StatusNoContent,
+		"[byward-metrics.monitoring.svc]:9090": http.StatusMisdirectedRequest, "[mcp.example.com]:443": http.StatusMisdirectedRequest,
+		"[127.0.0.1]:80": http.StatusMisdirectedRequest, "[0.0.0.0]": http.StatusMisdirectedRequest,
+		":80": http.StatusMisdirectedRequest, "[not an address:]": http.StatusMisdirectedRequest,
+		"[::1": http.StatusMisdirectedRequest, "::1]": http.StatusMisdirectedRequest, "127.1:443]": http.StatusMisdirectedRequest,
+		"127.0.0.1:+80": http.StatusMisdirectedRequest, "127.0.0.1:-1": http.StatusMisdirectedRequest, "127.0.0.1:http": http.StatusMisdirectedRequest,
+		"127.0.0.1:000080": http.StatusMisdirectedRequest, "127.0.0.1:99999999999999999999": http.StatusMisdirectedRequest,
+		// A zoned address with a stray "]": main dropped the "]" and took the zoned address.
+		"fe80::1%eth0]": http.StatusMisdirectedRequest, "FE80::1%25eth0]": http.StatusMisdirectedRequest,
 	}
 	for host, want := range cases {
-		r := httptest.NewRequest("GET", "/metrics", nil)
-		r.Host = host
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
+		h.ServeHTTP(w, withHost(host))
 		if w.Code != want {
 			t.Errorf("host %q: got %d want %d", host, w.Code, want)
+		}
+	}
+	// A bracketed IPv6 address with junk after its port names no host, and is refused.
+	for _, in := range []string{
+		"[0:0::1]:443:",
+		"[0:0::1]:443:8443",
+		"[0:0::1]:443]",
+		"[2001:DB8:0:0::1]:8443:",
+		"[2001:DB8:0:0::1]:8443:8443",
+		"[2001:DB8:0:0::1]:8443]",
+		"[2001:db8:0:0:0:0:0:1]:80:",
+		"[2001:db8:0:0:0:0:0:1]:80:8443",
+		"[2001:db8:0:0:0:0:0:1]:80]",
+		"[2001:db8::1]:4000:",
+		"[2001:db8::1]:4000:8443",
+		"[2001:db8::1]:4000]",
+		"[2001:db8::1]:8443:",
+		"[2001:db8::1]:8443:8443",
+		"[2001:db8::1]:8443]",
+		"[::1]:443:",
+		"[::1]:443:8443",
+		"[::1]:443]",
+		"[::1]:65535:",
+		"[::1]:65535:8443",
+		"[::1]:65535]",
+		"[::1]:8080:",
+		"[::1]:8080:8443",
+		"[::1]:8080]",
+		"[::1]:80:",
+		"[::1]:80:443",
+		"[::1]:80:443:",
+		"[::1]:80:443:8443",
+		"[::1]:80:443]",
+		"[::1]:80:8443",
+		"[::1]:80]",
+		"[::1]:8443:",
+		"[::1]:8443:8443",
+		"[::1]:8443]",
+		"[::1]:9090:",
+		"[::1]:9090:8443",
+		"[::1]:9090]",
+		"[::FFFF:1.2.3.4]:8080:",
+		"[::FFFF:1.2.3.4]:8080:8443",
+		"[::FFFF:1.2.3.4]:8080]",
+		"[::FFFF:127.0.0.1]:8443:",
+		"[::FFFF:127.0.0.1]:8443:8443",
+		"[::FFFF:127.0.0.1]:8443]",
+		"[::ffff:102:304]:8080:",
+		"[::ffff:102:304]:8080:8443",
+		"[::ffff:102:304]:8080]",
+		"[::ffff:127.0.0.1]:80:",
+		"[::ffff:127.0.0.1]:80:8443",
+		"[::ffff:127.0.0.1]:80]",
+		"[::ffff:127.0.0.1]:8443:",
+		"[::ffff:127.0.0.1]:8443:8443",
+		"[::ffff:127.0.0.1]:8443]",
+		"[::ffff:7f00:1]:8443:",
+		"[::ffff:7f00:1]:8443:8443",
+		"[::ffff:7f00:1]:8443]",
+		"[FE80::1]:8443:",
+		"[FE80::1]:8443:8443",
+		"[FE80::1]:8443]",
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, withHost(in))
+		if w.Code != http.StatusMisdirectedRequest {
+			t.Errorf("Host %q: %d, want 421", in, w.Code)
 		}
 	}
 }
@@ -346,6 +425,7 @@ func TestTheHostCheckFoldsCaseAddressSpellingAndOneDefaultPortAndNothingElse(t *
 		{"mcp.example.com", []string{"mcp.example.com:080", "mcp.example.com:0443", "mcp.example.com:00080", "mcp.example.com:", "ｍｃｐ.example.com",
 			"mcp.example.com:+443", "mcp.example.com:99999", "mcp.example.com."}},
 		{"xn--bcher-kva.example", []string{"bücher.example"}},
+		{"[::1]", []string{"[::1]:"}},
 	} {
 		t.Run(tc.listed, func(t *testing.T) { matchesOnly(t, tc.listed, nil, tc.refuse) })
 	}
@@ -353,11 +433,8 @@ func TestTheHostCheckFoldsCaseAddressSpellingAndOneDefaultPortAndNothingElse(t *
 
 // originCode is Origins' answer to one Origin header against listed.
 func originCode(listed []string, o string) (int, http.Header) {
-	h := Origins(quiet(), listed, ok)
-	r := httptest.NewRequest("POST", "/mcp", nil)
-	r.Header.Set("Origin", o)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
+	Origins(quiet(), listed, ok).ServeHTTP(w, withOrigin(o))
 	return w.Code, w.Header()
 }
 
@@ -388,6 +465,7 @@ func TestAnOriginMatchesItsEntryOnceFoldedAndNothingElse(t *testing.T) {
 		// Spellings no browser sends, as the Host check does not fold them either.
 		{"https://app.example:0443", http.StatusForbidden, nil},
 		{"https://app.example:", http.StatusForbidden, nil},
+		{"https://[::1]:", http.StatusForbidden, nil},
 		{"https://ａｐｐ.example", http.StatusForbidden, nil},
 		{"https://bücher.example", http.StatusForbidden, nil},
 		// Only the scheme's own default port.
@@ -426,4 +504,83 @@ func TestCORSEchoesTheOriginAsSent(t *testing.T) {
 			t.Errorf("Origin %q: got %d, Access-Control-Allow-Origin %q; want it echoed as sent", o, code, h.Get("Access-Control-Allow-Origin"))
 		}
 	}
+}
+
+// A Host or Origin with a stray bracket, one no browser sends, is refused by every check, as on main
+// before #644 made host.Split the one bracket rule: the same inputs host's strayBracketHosts pins.
+func TestAHostOrOriginWithAStrayBracketIsRefusedByEveryCheck(t *testing.T) {
+	hosts := []string{"127.0.0.1:443", "127.0.0.1:8080", "127.0.0.1", "mcp.example.com", "app.example", "localhost:8080", "[::1]:8080"}
+	origins := []string{"https://app.example", "https://mcp.example.com", "http://127.0.0.1:8080"}
+	pub, internal, cors := Hosts(quiet(), hosts, ok), InternalHosts(quiet(), hosts, ok), Origins(quiet(), origins, ok)
+	// Controls: a spelling each check folds passes without a stray bracket, so the refusals below are
+	// the bracket's, not the spelling's.
+	for _, tc := range []struct {
+		check string
+		h     http.Handler
+		r     *http.Request
+	}{
+		{"public", pub, withHost("127.1:443")}, {"internal", internal, withHost("127.1:8080")},
+		{"origin", cors, withOrigin("HTTPS://APP.EXAMPLE")},
+	} {
+		w := httptest.NewRecorder()
+		tc.h.ServeHTTP(w, tc.r)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("%s without the stray bracket: %d, want 204", tc.check, w.Code)
+		}
+	}
+	for _, in := range []string{
+		"127.1:443]",
+		"127.1:8080]",
+		"2130706433:8080]",
+		"0x7f.0.0.1:8080]",
+		"0177.0.0.1:8080]",
+		"127.1:9090]",
+		"HTTPS://APP.EXAMPLE]",
+		"https://APP.Example]",
+		"https://APP.example]",
+		"Origin %q: got %d, Access-Control-Allow-Origin %q; want it echoed as sent]",
+		"BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp]",
+		"BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp]",
+		"BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF]",
+		"(12 CHARACTERS, NOT SHOWN): IT HAS A \"[\" IN ITS HOST WITHOUT ITS \"]\"",
+		"(18 characters, not shown): it has a control character, which a URL cannot hold]",
+		"(10 characters, not shown): it is not an IPv6 address without a zone; ]",
+		"(19 characters, not shown): it is not an IPv6 address without a zone; ]",
+		"(12 characters, not shown): it is not an IPv6 address without a zone; ]",
+		"(5 characters, not shown): it is not an IPv6 address without a zone; ]",
+		"HTTPS://XN--BCHER-KVA.example]",
+		"without dev: want error pointing at the _FILE variable, got %v]",
+		" (14 characters, not shown): it is neither a CIDR nor an IP address]",
+		" (8 characters, not shown): its address, before the \"/\", is not an IP address]",
+		"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read]",
+	} {
+		for _, tc := range []struct {
+			check string
+			h     http.Handler
+			r     *http.Request
+			want  int
+		}{
+			{"public", pub, withHost(in), http.StatusMisdirectedRequest},
+			{"internal", internal, withHost(in), http.StatusMisdirectedRequest},
+			{"origin", cors, withOrigin(in), http.StatusForbidden},
+		} {
+			w := httptest.NewRecorder()
+			tc.h.ServeHTTP(w, tc.r)
+			if w.Code != tc.want {
+				t.Errorf("%s %q: %d, want %d", tc.check, in, w.Code, tc.want)
+			}
+		}
+	}
+}
+
+func withHost(h string) *http.Request {
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	r.Host = h
+	return r
+}
+
+func withOrigin(o string) *http.Request {
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	r.Header.Set("Origin", o)
+	return r
 }

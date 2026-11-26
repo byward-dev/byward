@@ -208,12 +208,12 @@ mcp.10
   host header: [::ffff:7f00:1]
   loopback as written: true
 [fe80::1%25eth0]
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (28 characters, not shown): its host:port is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host:port is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-  upstream: [fe80::1%eth0]
+  public https: refused: BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (28 characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
+  public http: refused: BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (27 characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
+  upstream: refused: BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (27 characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
   listen: [fe80::1%25eth0]:80
   allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (16 characters, not shown): it is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-  origin: refused: its host:port is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+  origin: refused: it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
   cimd list: "has a character no host name holds at position 1; a host name has only letters, digits, - . and _"
   denylist: "has a character no host name holds at position 1; a host name has only letters, digits, - . and _"
   host header: [fe80::1%25eth0]

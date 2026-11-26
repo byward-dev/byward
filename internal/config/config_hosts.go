@@ -39,8 +39,8 @@ func browserIPv4(h string) string {
 
 // nameCharReason says why name, a host, is refused for a character no host name holds (ADR-0032 §3:
 // only ASCII letters, digits, "-", "." and "_"; an internationalized name in its xn-- form), completing
-// "its host …"; "" when it holds none, or is an IP address (host.BadNameChar), whose IPv6 zone may hold
-// any character. It names the character's place, or says the name is not ASCII; never the character
+// "its host …"; "" when it holds none, or is an IP address (host.BadNameChar), whose ":" is an IPv6
+// address's, not a name's. It names the character's place, or says the name is not ASCII; never the character
 // or the host, which a secret may be.
 func nameCharReason(name string) string {
 	place := host.BadNameChar(name)
