@@ -42,6 +42,10 @@ func TestVerifyJWT(t *testing.T) {
 		"aud array of one":        {edit: func(c map[string]any) { c["aud"] = []any{"cid"} }, ok: true},
 		"aud with extra audience": {edit: func(c map[string]any) { c["aud"] = []any{"cid", "other"} }},
 		"aud other":               {edit: func(c map[string]any) { c["aud"] = "other" }},
+		// aud values are case-sensitive strings (RFC 7519 §4.1.3), so an audience that differs from
+		// ours only in case is another audience; config refuses an upper-case Entra client ID for it (#514).
+		"aud in upper case":       {edit: func(c map[string]any) { c["aud"] = "CID" }},
+		"aud array in upper case": {edit: func(c map[string]any) { c["aud"] = []any{"CID"} }},
 		"no aud":                  {edit: func(c map[string]any) { delete(c, "aud") }},
 		"azp other":               {edit: func(c map[string]any) { c["azp"] = "other" }},
 		"azp ours":                {edit: func(c map[string]any) { c["azp"] = "cid" }, ok: true},
