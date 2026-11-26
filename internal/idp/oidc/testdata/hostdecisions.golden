@@ -78,7 +78,7 @@ refused because:
      84  has an IPv6 zone, which a URL cannot carry; give the address without its %zone
      20  has no host before its port
       3  has no host
-      2  has a fragment, which an endpoint never has
+      2  has a fragment, which an IdP's URL never has
       2  has no "//" after its scheme
       1  has a scheme other than http or https
       1  has no scheme such as https://
@@ -158,7 +158,7 @@ refused because:
      84  has an IPv6 zone, which a URL cannot carry; give the address without its %zone
      20  has no host before its port
       3  has no host
-      2  has a fragment, which an endpoint never has
+      2  has a fragment, which an IdP's URL never has
       2  has no "//" after its scheme
       1  has a scheme other than http or https
       1  has no scheme such as https://
@@ -238,7 +238,7 @@ refused because:
      84  has an IPv6 zone, which a URL cannot carry; give the address without its %zone
      20  has no host before its port
       3  has no host
-      2  has a fragment, which an endpoint never has
+      2  has a fragment, which an IdP's URL never has
       2  has no "//" after its scheme
       1  has a scheme other than http or https
       1  has no scheme such as https://

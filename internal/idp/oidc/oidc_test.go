@@ -592,8 +592,9 @@ func TestARefusedEndpointIsNamedAsLogsMay(t *testing.T) {
 		"http://u:SECRET@idp.example/token?code=SECRET": "http://idp.example/token holds a user name or password",
 		"http://idp.example/token?code=SECRET":          "http://idp.example/token must use https",
 		"token?code=SECRET":                             "<invalid URL> has no scheme such as https://",
-		"https://idp.example/token?code=SECRET#f":       "https://idp.example/token has a fragment, which an endpoint never has",
-		"https://:443/token":                            "https://:443/token has no host before its port", // #625
+		"https://idp.example/token?code=SECRET#f":       "https://idp.example/token has a fragment, which an IdP's URL never has",
+		"https://[fe80::1%25eth0]/x#f":                  "https://[fe80::1%25eth0]/x has an IPv6 zone, which a URL cannot carry; give the address without its %zone", // the rule's reason first
+		"https://:443/token":                            "https://:443/token has no host before its port",                                                            // #625
 		"https://:/token":                               "https://:/token has no host before its port",
 		"https://u:SECRET@:443/token?code=SECRET":       "https://:443/token has no host before its port",
 	} {
@@ -751,8 +752,6 @@ func TestAnHTTPSIssuerOnANonPublicAddressIsDiscovered(t *testing.T) {
 	}
 }
 
-// An endpoint the IdP's discovery document lists is held to checkURL's rule: one over plain http, or
-// with a port and no host (#625), makes the provider not ready, fatally, naming the endpoint.
 // Each endpoint a discovery document names is held to the one URL rule (#651): one with an IPv6 zone
 // is refused at discovery, as a fatal error naming the endpoint as logs may show it.
 func TestADiscoveredEndpointWithAZoneIsRefused(t *testing.T) {
@@ -779,6 +778,8 @@ func TestADiscoveredEndpointWithAZoneIsRefused(t *testing.T) {
 	}
 }
 
+// An endpoint the IdP's discovery document lists is held to checkURL's rule: one over plain http, or
+// with a port and no host (#625), makes the provider not ready, fatally, naming the endpoint.
 func TestADiscoveredEndpointThatBreaksTheRuleMakesTheProviderNotReady(t *testing.T) {
 	for _, bad := range []string{"http://idp.example/token", "https://:443/token"} {
 		t.Run(bad, func(t *testing.T) {
