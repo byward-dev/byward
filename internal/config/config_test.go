@@ -1256,8 +1256,11 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 		{"[::1%a:b]:80", "it " + ruleZone},
 		{"[::1%\u00e0]:80", "it " + ruleZone},
 		{"[::1%" + canaryText + " x]:80", "it " + ruleZone},
-		// A zone only on an IPv6 address: a '%' on anything else is the host's own fault.
+		// A zone only on an IPv6 address: a '%' on anything else is the host's own fault, as before an
+		// address that is no IP address, or an IPv4 one (the ':' after the '%' lets it past the brackets).
 		{"[zz:zz%a b]:80", "it has a host that is neither an IP address nor a host name"},
+		{"[1.2.3.4%a:b]:80", "it has a host that is neither an IP address nor a host name"},
+		// A '%' in a name is a character no host name holds.
 		{"my% x:80", "its host " + ruleNameChar + "3" + ruleNameChars},
 		// A ':' inside the brackets passes them, as host.Parse's rule does; a host that is still no IPv6
 		// address gets the host reason.
