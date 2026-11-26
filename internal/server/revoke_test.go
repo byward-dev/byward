@@ -247,14 +247,17 @@ func TestRevokeUserTakesAnOIDCSubjectAsItIs(t *testing.T) {
 			}
 		}
 	})
-	user, _, err := RevokeUser(context.Background(), cfg, discard, " f3a1-Alice ")
-	if err != nil || user != "f3a1-Alice" {
-		t.Fatalf("RevokeUser = %q, %v", user, err)
+	// What an operator pastes is trimmed: sign-in stores no subject with white space at either end.
+	for _, pasted := range []string{"f3a1-Alice\n", " f3a1-Alice "} {
+		if user, _, err := RevokeUser(context.Background(), cfg, discard, pasted); err != nil || user != "f3a1-Alice" {
+			t.Fatalf("RevokeUser(%q) = %q, %v; want f3a1-Alice", pasted, user, err)
+		}
 	}
 	if !grantGone(t, cfg, "alice") || grantGone(t, cfg, "other") {
 		t.Fatal("revoke-user must end exactly the grants of that subject")
 	}
-	for _, key := range []string{"  ", "alice\nbob", "a\x00b"} {
+	// The sub rule, not only the one every claim has: a sub is at most 255 ASCII characters.
+	for _, key := range []string{"  ", "alice\nbob", "a\x00b", strings.Repeat("a", 256), "ålice"} {
 		if _, _, err := RevokeUser(context.Background(), cfg, discard, key); !errors.Is(err, ErrNotAUserKey) {
 			t.Errorf("RevokeUser(%q) = %v, want ErrNotAUserKey", key, err)
 		}
@@ -290,7 +293,8 @@ func TestRevokeUserTakesATokenAsAnOIDCSubRevokesNobodyAndAuditsItRedacted(t *tes
 // sign-in stored stays revocable (#594). Through the real logger, the audit record names a
 // credential-shaped key (logging.LooksSecret, which also matches a name such as "Ann Basic Lee", a sub
 // such as eyJohn.Smith, or an email that happens to read like a token) as [REDACTED], and no other
-// attribute carries any part of it; any other key is named in full.
+// attribute carries a piece of it of 4 or more characters (other than one the issuer's host holds, such
+// as example); any other key is named in full.
 func TestRevokeUserRevokesAKeyUnderAnySubjectClaimAndAuditsACredentialShapedOneRedacted(t *testing.T) {
 	for _, tc := range []struct {
 		claim, key string
@@ -340,7 +344,7 @@ func TestRevokeUserRevokesAKeyUnderAnySubjectClaimAndAuditsACredentialShapedOneR
 				return
 			}
 			for _, part := range strings.FieldsFunc(tc.key, func(r rune) bool { return r == ' ' || r == '.' || r == '@' }) {
-				if len(part) >= 4 && strings.Contains(logs.String(), part) {
+				if len(part) >= 4 && !strings.Contains("https://sso.example.com/realms/acme", part) && strings.Contains(logs.String(), part) {
 					t.Errorf("the log holds %q, part of the key: %s", part, logs.String())
 				}
 			}

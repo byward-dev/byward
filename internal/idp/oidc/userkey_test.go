@@ -58,7 +58,7 @@ func TestASubIsAtMost255ASCIICharactersWithoutAControlCharacter(t *testing.T) {
 }
 
 // Any other subject claim (email, preferred_username, upn, name) holds what the IdP put there, so
-// its user key is only trimmed, never empty and without a control character: a non-ASCII, long or
+// its user key is only trimmed, never empty, valid UTF-8 and without a control character: a non-ASCII, long or
 // credential-shaped value is a real user's, whom revoke-user must be able to revoke (#594).
 func TestAnotherSubjectClaimsUserKeyIsAnyValueWithoutAControlCharacter(t *testing.T) {
 	for _, tc := range []struct{ claim, key string }{
@@ -73,7 +73,7 @@ func TestAnotherSubjectClaimsUserKeyIsAnyValueWithoutAControlCharacter(t *testin
 			t.Errorf("userKey(%s, %q) = %q, %v; want it as given, trimmed", tc.claim, tc.key, got, ok)
 		}
 	}
-	for _, key := range []string{"", "  ", "a\x00b", "alice\nbob", "a\x7fb"} {
+	for _, key := range []string{"", "  ", "a\x00b", "alice\nbob", "a\x7fb", "alice\xff", "\xffalice", "\u0080x", "a\u0085b", "a\u009fb"} {
 		if got, ok := userKey("email", key); ok {
 			t.Errorf("userKey(email, %q) = %q, accepted; want it refused", key, got)
 		}
@@ -81,20 +81,31 @@ func TestAnotherSubjectClaimsUserKeyIsAnyValueWithoutAControlCharacter(t *testin
 }
 
 // Sign-in refuses, as Fatal, an ID token whose subject revoke-user could not name (#594): a sub OIDC
-// Core forbids, or one with white space around it. The error names the claim and gives the value
-// only by its length.
+// Core forbids, or a subject under any claim with white space at either end. Sign-in never strips it:
+// " alice" and "alice" are two subs, and trimming one would merge them into one user. So a stored
+// subject is always its own trimmed form, and revoke-user can trim what an operator pastes. The error
+// names the claim and gives the value only by its length.
 func TestSignInRefusesASubjectRevokeUserCouldNotNameAndDoesNotShowIt(t *testing.T) {
 	const canary = "LK7CANARY"
-	for name, tc := range map[string]struct{ sub, shown string }{
-		"256 characters":          {strings.Repeat("a", 255) + canary, "sub claim (264 characters, not shown)"},
-		"non-ASCII":               {"å" + canary, "sub claim (10 characters, not shown)"},
-		"surrounding white space": {" " + canary, "sub claim (10 characters, not shown)"},
+	for name, tc := range map[string]struct{ claim, value, shown string }{
+		"a sub longer than 255 characters": {"sub", strings.Repeat("a", 255) + canary, "sub claim (264 characters, not shown)"},
+		"a non-ASCII sub":                  {"sub", "å" + canary, "sub claim (10 characters, not shown)"},
+		"a sub with a space first":         {"sub", " alice" + canary, "sub claim (15 characters, not shown)"},
+		"a sub with a newline last":        {"sub", "alice" + canary + "\n", "sub claim (15 characters, not shown)"},
+		"an email with a space first":      {"email", " alice" + canary + "@example.com", "email claim (27 characters, not shown)"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			e := newEnv(t, Config{}, fakeidp.WithUser(fakeidp.User{Subject: tc.sub}))
+			user, cfg := fakeidp.User{Subject: "f47ac10b-58cc-4372-a567-0e02b2c3d479"}, Config{}
+			if tc.claim == "sub" {
+				user.Subject = tc.value
+			} else {
+				user.Email, cfg.SubjectClaim = tc.value, tc.claim
+			}
+			e := newEnv(t, cfg, fakeidp.WithUser(user))
 			_, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
 			var ie *idp.Error
-			if !errors.As(err, &ie) || ie.Class != idp.Fatal || strings.Contains(err.Error(), canary) || !strings.Contains(err.Error(), tc.shown) {
+			if !errors.As(err, &ie) || ie.Class != idp.Fatal || strings.Contains(err.Error(), canary) || !strings.Contains(err.Error(), tc.shown) ||
+				!strings.Contains(err.Error(), "at most 255 printable ASCII characters") {
 				t.Fatalf("err = %v, want a Fatal IdP error naming the %q, not the value", err, tc.shown)
 			}
 		})

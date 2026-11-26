@@ -370,7 +370,7 @@ func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identit
 	// Stored only as revoke-user can name it (#594): a sub OIDC Core forbids, or any subject with
 	// surrounding white space or a control character, is refused, and never shown.
 	if key, ok := p.UserKey(subject); !ok || key != subject {
-		return idp.Identity{}, &idp.Error{Class: idp.Fatal, Err: fmt.Errorf("oidc: the ID token's %s claim %s is not a user key revoke-user could name (for sub: 1 to %d printable ASCII characters, OIDC Core 1.0 §2)",
+		return idp.Identity{}, &idp.Error{Class: idp.Fatal, Err: fmt.Errorf("oidc: the ID token's %s claim %s is not a user key revoke-user could name (no white space at either end and no control character; a sub is also at most %d printable ASCII characters, OIDC Core 1.0 §2)",
 			p.cfg.SubjectClaim, logging.NotShown(subject), MaxSub)}
 	}
 	if p.cfg.HostedDomain != "" && idp.StringClaim(claims, "hd") != p.cfg.HostedDomain {

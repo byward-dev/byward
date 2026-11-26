@@ -398,8 +398,8 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 	}
 }
 
-// revoke-user shows no key it was given: a token pasted where the user key belongs is refused, and
-// named by its length, as init names a value it refuses (#594, ADR-0031 §1). Every form of a secret,
+// revoke-user shows no key it was given: under Entra, a token pasted where the user key belongs is
+// refused (it is no tid:oid), and named by its length, as init names a value it refuses (#594, ADR-0031 §1). Every form of a secret,
 // and a token's three segments, is given as the key; each must reach the refusal and show nothing.
 func TestRevokeUserShowsNoKeyItWasGiven(t *testing.T) {
 	keys := append(slices.Clone(secretForms), struct{ name, value string }{"JWT", "eyJhbGciOiJSUzI1NiJ9." + canary + ".c2lnbmF0dXJl"})

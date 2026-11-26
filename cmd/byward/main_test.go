@@ -330,6 +330,7 @@ func TestRevokeCommandsExit2OnMisuseOrNoStore1OnAStoreFailureAndNameTheRevokedUs
 		{"revoke-user without a key", []string{"revoke-user"}, noStore, exitConfig, "", revokeUserUsage},
 		{"revoke-user with two keys", []string{"revoke-user", user, user}, noStore, exitConfig, "", revokeUserUsage},
 		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.example"}, noStore, exitConfig, "", `byward: revoke-user (21 characters, not shown): not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub; a sub is at most 255 printable ASCII characters), as the audit records' user_key shows it` + "\n"},
+		{"revoke-user with a non-ASCII email, named by its characters, not bytes", []string{"revoke-user", "jöhn@exämple.com"}, noStore, exitConfig, "", `byward: revoke-user (16 characters, not shown): not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub; a sub is at most 255 printable ASCII characters), as the audit records' user_key shows it` + "\n"},
 		{"revoke-all without --yes", []string{"revoke-all"}, noStore, exitConfig, "", revokeAllUsage},
 		{"revoke-all with yes instead of --yes", []string{"revoke-all", "yes"}, noStore, exitConfig, "", revokeAllUsage},
 		{"revoke-all with --yes and more", []string{"revoke-all", "--yes", "extra"}, noStore, exitConfig, "", revokeAllUsage},
@@ -758,6 +759,7 @@ func TestRevokeUserNamesACredentialShapedKeyOnlyByItsLength(t *testing.T) {
 		hidden     string // the key as the line names it; "" when it is shown in full
 	}{
 		{"sub", "eyJohn.Smith", "(12 characters, not shown)"},
+		{"sub", "eyJohn.Smith ", "(12 characters, not shown)"}, // judged trimmed: untrimmed, it no longer looks like one
 		{"sub", "eyJhbGciOiJSUzI1NiJ9." + canary + ".c2ln", "(35 characters, not shown)"},
 		{"sub", "f47ac10b-58cc-4372-a567-0e02b2c3d479", ""},
 		{"name", "Ann Basic Lee", "(13 characters, not shown)"},
