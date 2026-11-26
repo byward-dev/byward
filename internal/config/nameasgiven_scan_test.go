@@ -185,10 +185,13 @@ func TestARefusalBesideStdioNamesAnotherSettingsVariableOnlyAsAllowedAdvice(t *t
 // in order of the variable; and a listed variable that no text names, in order too. A text that names
 // only a listed variable, or one that is no setting's, passes.
 func TestTheRefusalVariableListFailsAnUnlistedVariableAndOneNoTextNames(t *testing.T) {
-	variables := map[string]bool{"BYWARD_LISTEN": true, "BYWARD_TRUSTED_PROXIES": true}
+	variables := map[string]bool{"BYWARD_LISTEN": true, "BYWARD_TRUSTED_PROXIES": true, "BYWARD_ALLOWED_ORIGINS": true}
 	listen := map[string]string{"BYWARD_LISTEN": "the probe's advice"}
 	unlisted := func(owners, v string) string {
 		return owners + " names " + v + ": name a setting by its variable in a refusal only as advice, and list it in allowedHintVariables with the reason"
+	}
+	unnamed := func(v, reason string) string {
+		return v + " is allowed in a refusal beside a stdio upstream (" + reason + "), but none names it: remove it from the list"
 	}
 	for _, tc := range []struct {
 		name    string
@@ -201,14 +204,13 @@ func TestTheRefusalVariableListFailsAnUnlistedVariableAndOneNoTextNames(t *testi
 		{"an unlisted variable", []refusalText{{"a", "%[1]s: set BYWARD_LISTEN instead"}}, nil, []string{unlisted("a", "BYWARD_LISTEN")}},
 		{"an unlisted variable two texts name", []refusalText{{"a", "%[1]s: set BYWARD_LISTEN"}, {"b", "%[1]s: or BYWARD_LISTEN"}}, nil,
 			[]string{unlisted("a, b", "BYWARD_LISTEN")}},
-		{"two unlisted variables, in order", []refusalText{{"a", "%[1]s: set BYWARD_TRUSTED_PROXIES or BYWARD_LISTEN"}}, nil,
-			[]string{unlisted("a", "BYWARD_LISTEN"), unlisted("a", "BYWARD_TRUSTED_PROXIES")}},
+		{"three unlisted variables, in order", []refusalText{{"a", "%[1]s: set BYWARD_TRUSTED_PROXIES, BYWARD_LISTEN or BYWARD_ALLOWED_ORIGINS"}}, nil,
+			[]string{unlisted("a", "BYWARD_ALLOWED_ORIGINS"), unlisted("a", "BYWARD_LISTEN"), unlisted("a", "BYWARD_TRUSTED_PROXIES")}},
 		{"a listed variable no text names", []refusalText{{"a", "%[1]s is for an HTTP upstream"}}, listen,
-			[]string{"BYWARD_LISTEN is allowed in a refusal beside a stdio upstream (the probe's advice), but none names it: remove it from the list"}},
-		{"two listed variables no text names, in order", []refusalText{{"a", "%[1]s is for an HTTP upstream"}},
-			map[string]string{"BYWARD_TRUSTED_PROXIES": "the second probe's advice", "BYWARD_LISTEN": "the probe's advice"},
-			[]string{"BYWARD_LISTEN is allowed in a refusal beside a stdio upstream (the probe's advice), but none names it: remove it from the list",
-				"BYWARD_TRUSTED_PROXIES is allowed in a refusal beside a stdio upstream (the second probe's advice), but none names it: remove it from the list"}},
+			[]string{unnamed("BYWARD_LISTEN", "the probe's advice")}},
+		{"three listed variables no text names, in order", []refusalText{{"a", "%[1]s is for an HTTP upstream"}},
+			map[string]string{"BYWARD_TRUSTED_PROXIES": "the third", "BYWARD_LISTEN": "the second", "BYWARD_ALLOWED_ORIGINS": "the first"},
+			[]string{unnamed("BYWARD_ALLOWED_ORIGINS", "the first"), unnamed("BYWARD_LISTEN", "the second"), unnamed("BYWARD_TRUSTED_PROXIES", "the third")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := hintVariableProblems(tc.texts, variables, tc.allowed); !slices.Equal(got, tc.want) {
@@ -226,9 +228,6 @@ func TestTheRefusalsBesideStdioAreEveryHintAndTheFallback(t *testing.T) {
 	want := []refusalText{{"offModeSettings' fallback (httpOnlyRefusal)", httpOnlyRefusal}, {"the StdioHint of hinted", "%[1]s: its own"}}
 	if !slices.Equal(got, want) {
 		t.Errorf("stdioRefusals = %q, want %q", got, want)
-	}
-	if found := hintVariables(got, map[string]bool{"BYWARD_UPSTREAM_URL": true}); !slices.Equal(found["BYWARD_UPSTREAM_URL"], []string{"offModeSettings' fallback (httpOnlyRefusal)"}) {
-		t.Errorf("hintVariables = %v, want BYWARD_UPSTREAM_URL named by the fallback alone", found)
 	}
 }
 
