@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
@@ -456,7 +458,7 @@ var tokenForms = []struct {
 	{"a Bearer credential", "Bearer LK7CANARY", true},
 }
 
-// The operator commands show no argument they were given and refuse (#594). Every command but
+// The operator commands show no argument they were given, whether they refuse it or take it (#594). Every command but
 // revoke-user and init takes only fixed words, so a value after them gets the command's usage line;
 // init has TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints. revoke-user under an oidc IdP keyed on
 // sub takes a key as OIDC Core allows a sub: every secret form is within that rule, so it is taken
@@ -464,7 +466,7 @@ var tokenForms = []struct {
 // refused and named by its length. Entra refuses every token form (TestRevokeUserShowsNoKeyItWasGiven
 // covers its other forms). Every command in the commands map has a cell here or names its test. Nothing reaches
 // os.Stderr or the log package.
-func TestOperatorCommandsShowNoArgumentTheyRefuse(t *testing.T) {
+func TestOperatorCommandsShowNoArgumentTheyAreGiven(t *testing.T) {
 	const (
 		checkUsage           = "byward: usage: byward check --offline [-- stdio-upstream-command [args...]] (for the network checks, run byward doctor)\n"
 		doctorUsage          = "byward: usage: byward doctor [--json] [-- stdio-upstream-command [args...]]\n"
@@ -478,7 +480,8 @@ func TestOperatorCommandsShowNoArgumentTheyRefuse(t *testing.T) {
 	oidcEnv := append(without(entraEnv, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(entraEnv, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
 		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
 	refused := func(v string) string {
-		return "byward: revoke-user " + logging.NotShown(v) + ": " + server.ErrNotAUserKey.Error() + "\n"
+		// The length is counted here, not by logging.NotShown, so a NotShown that showed part of v fails.
+		return fmt.Sprintf("byward: revoke-user (%d characters, not shown): %s\n", utf8.RuneCountInString(v), server.ErrNotAUserKey)
 	}
 	type cell struct {
 		place     string

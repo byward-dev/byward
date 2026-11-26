@@ -781,7 +781,7 @@ func TestRevokeUserNamesACredentialShapedKeyOnlyByItsLength(t *testing.T) {
 			if code != exitOK || stdout != want {
 				t.Fatalf("code %d, stdout %q, stderr %q; want exit 0 and %q", code, stdout, stderr, want)
 			}
-			if tc.hidden != "" && strings.Contains(stdout+stderr, tc.key) {
+			if tc.hidden != "" && strings.Contains(stdout+stderr, strings.TrimSpace(tc.key)) {
 				t.Errorf("the key is shown: stdout %q, stderr %q", stdout, stderr)
 			}
 		})
