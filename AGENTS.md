@@ -11,8 +11,8 @@ first-class Microsoft Entra ID support. Single Go binary. Scope and non-goals: A
 - Work items live in GitHub Issues (`gh issue view <n>`). The docs index is `docs/README.md`.
 - When grilling a feature, walk `docs/quality-lenses.md`.
 - Reuse before writing. Before adding a helper, fake, parser or test recorder, search `origin/main`
-  for one that already does it and extend it. A second copy is extracted at the third caller,
-  and the second copy cites the first.
+  for one that already does it and extend it. Shared code is extracted into one helper at its
+  third caller; until then, the second copy cites the first.
 
 ## Commands
 
@@ -66,7 +66,8 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
   correctness bug an operator, user or client can hit, or duplicates existing code. Anything else
   goes to the PR's "Known residuals" with one line why, or is dropped: wording, an input no real
   client or operator sends, a new golden column or family with no production check behind it.
-  The same-gap rule below still decides where class findings go.
+  The same-gap rule below still decides where class findings go. A finding sent to Known
+  residuals or dropped doesn't keep a round open.
 - **No new abstraction:** a sweep fix may not add an interface or abstraction with fewer than 3
   callers. SOLID findings are fixed within that limit.
 - **Same gap elsewhere:** a finding that another setting, check or surface has the gap the PR fixes
