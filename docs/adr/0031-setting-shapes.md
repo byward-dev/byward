@@ -1,6 +1,6 @@
 # ADR-0031: Setting shapes: display and refusal
 
-- Status: Accepted; amended 2026-11-22 (#587)
+- Status: Accepted; amended 2026-11-22 (#587), 2026-11-26 (#495)
 - Date: 2026-11-19
 - Issue: #492 (tracker #485); amends ADR-0020 §4 and §6
 
@@ -130,6 +130,11 @@ startup and `--print-config` show paths as before. A setting has the path shape 
 never both; a secret's file (`<ENV>_FILE`) is still a path variable (`PathVariables`), named by its
 setting when it cannot be read. The path settings are listed literally in the shape tests, beside the
 other shapes' settings.
+
+_Amended 2026-11-26 (#495):_ `listShape` means the value is a comma-separated list whose entries
+are not URLs (`IsList`, as is the URL list shape). It displays and refuses as `asGivenShape` does. No
+entry holds a comma, so the check for a secret's kind reads each shown entry on its own: a comma
+that a URL's user part may hold elsewhere never joins two entries.
 
 ### 4. Where the rule is written down
 

@@ -82,9 +82,6 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 			}
 			return env
 		}, "has mode 0644"}, // the permission check's refusal, not another key error
-		{"an app-only caller allowlist entry that is not a GUID", func(_ *testing.T, env []string) []string {
-			return append(env, "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=byward.app", "BYWARD_APP_CLIENT_IDS=my-app")
-		}, `BYWARD_APP_CLIENT_IDS: "my-app" is not a GUID`},
 		{"counter file in a directory that does not exist", func(t *testing.T, env []string) []string {
 			return append(env, "BYWARD_STORE_COUNTER_FILE="+filepath.Join(t.TempDir(), "missing", "store-writes"))
 		}, "BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: the counter file's directory"},

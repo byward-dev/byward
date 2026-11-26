@@ -28,13 +28,13 @@ func (c *Config) appTokens(v *Values) []error {
 	if c.IdP != "" && c.IdP != "entra" { // a refused IdP has its own error
 		errs = append(errs, errorf("%s=entra cannot be used with %s=%s: app-only tokens are Entra's (ADR-0022 §1); remove it, or set %s=entra", named("app-tokens"), named("idp"), c.IdP, named("idp")))
 	}
-	if c.AppRoles, err = parseList(v.value("app-roles")); err != nil {
-		errs = append(errs, err)
+	var listErrs []error
+	if c.AppRoles, listErrs = parseChecked(v.value("app-roles"), appRoleValues); len(listErrs) > 0 {
+		errs = append(errs, listErrs...)
 	} else if len(c.AppRoles) == 0 {
 		errs = append(errs, errorf("%s is required with %s=entra: at least one app role, or every service principal in the tenant could call (ADR-0022 §4)", named("app-roles"), named("app-tokens")))
 	}
-	if c.AppClientIDs, err = parseList(v.value("app-client-ids")); err != nil {
-		errs = append(errs, err)
-	}
+	c.AppClientIDs, listErrs = parseChecked(v.value("app-client-ids"), guidsOf("application (client) IDs"))
+	errs = append(errs, listErrs...)
 	return errs
 }

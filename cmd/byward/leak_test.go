@@ -168,11 +168,11 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 		}
 	}
 	// Every setting but these, for which config refuses none of the forms above, refuses some form, so
-	// its refusal is run through every command: one that stops refusing, or starts, is named here.
-	acceptsEveryForm := []string{"app-client-ids", "app-roles", "entra-client-certificate", "entra-client-secret",
-		"gate-email-domains", "gate-groups", "gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key",
-		"oidc-client-key-id", "oidc-client-secret", "oidc-groups-claim", "oidc-name", "oidc-roles-claim", "oidc-subject-claim",
-		"operator-name", "resource-name", "scope-description", "store-postgres-dsn", "upstream-command", "upstream-credential"}
+	// its refusal is run through every command: one that stops refusing, or starts, is named here. A
+	// setting that is not secret refuses at least the form with a password in a URL, as a secret's
+	// kind (#495), so only secrets and the command, whose arguments are never shown, are left.
+	acceptsEveryForm := []string{"entra-client-certificate", "entra-client-secret", "oidc-client-key",
+		"oidc-client-secret", "store-postgres-dsn", "upstream-command", "upstream-credential"}
 	for _, s := range settings {
 		switch refuses := refusedTried[s.Name] > 0; {
 		case refuses && slices.Contains(acceptsEveryForm, s.Name):

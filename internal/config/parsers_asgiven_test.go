@@ -108,7 +108,7 @@ func TestEveryParserNamesItsSettingAsGiven(t *testing.T) {
 		{"wording with a control character", "operator-name", "a\x01b", one(func(v Value) error { _, err := parseWording(v, 80); return err })},
 		{"wording too long", "operator-name", strings.Repeat("a", 81), one(func(v Value) error { _, err := parseWording(v, 80); return err })},
 		{"a scope", "scope", "a b", one(func(v Value) error { _, err := parseScope(v); return err })},
-		{"a list of none", "app-roles", ",", one(func(v Value) error { _, err := parseList(v); return err })},
+		{"a list of none", "app-roles", ",", list(func(v Value) []error { _, errs := parseChecked(v, appRoleValues); return errs })},
 		{"a tenant", "entra-tenant", "nope", one(func(v Value) error { _, err := parseTenant(v); return err })},
 		{"an Entra client ID", "entra-client-id", "nope", one(func(v Value) error { _, err := parseEntraClientID(v); return err })},
 		{"a key algorithm", "oidc-client-key-alg", "XX256", one(func(v Value) error { _, err := parseKeyAlg(v); return err })},

@@ -148,7 +148,7 @@ func New(r Rules, o Options) (*Gate, []string, error) {
 			errs = append(errs, fieldErr(FieldHostedDomains, "only with Google"))
 		}
 	default:
-		errs = append(errs, fmt.Errorf("unknown IdP %q", o.IdP))
+		errs = append(errs, errors.New("unknown IdP")) // config allows only known ones; the name is never echoed
 	}
 	if len(errs) > 0 {
 		return nil, nil, errors.Join(errs...)
@@ -216,7 +216,7 @@ func guids(what string, in []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	for _, s := range in {
 		if !idp.IsGUID(s) {
-			return nil, fieldErr(what, "%q is not a GUID", s)
+			return nil, fieldErr(what, "an entry is not a GUID") // config refuses it first (#495); never echoed
 		}
 		out[strings.ToLower(s)] = true
 	}
@@ -227,7 +227,7 @@ func names(what string, in []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	for _, s := range in {
 		if s == "" || len(s) > 256 || strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
-			return nil, fieldErr(what, "%q is not a valid name", s)
+			return nil, fieldErr(what, "an entry is not a valid name") // config refuses it first (#495); never echoed
 		}
 		out[s] = true
 	}
@@ -239,7 +239,7 @@ func domains(what string, in []string) (map[string]bool, error) {
 	for _, s := range in {
 		d := strings.ToLower(s)
 		if !validDomain(d) {
-			return nil, fieldErr(what, "%q is not a domain name (no @, no wildcards)", s)
+			return nil, fieldErr(what, "an entry is not a domain name (no @, no wildcards)") // config refuses it first (#495); never echoed
 		}
 		out[d] = true
 	}

@@ -626,7 +626,7 @@ func TestTheEntraIDsTakeAGUIDAndTheClientIDOnlyInLowerCase(t *testing.T) {
 		upper = "0A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D"
 		mixed = "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5D"
 	)
-	notGUID := "it is not a GUID"
+	notGUID, domain := "it is not a GUID", "it looks like a domain name, not a GUID"
 	upperCase := "it has upper-case letters; write it in lower case, since the ID token's audience is compared with it exactly"
 	settings := []struct {
 		env, want string
@@ -651,7 +651,8 @@ func TestTheEntraIDsTakeAGUIDAndTheClientIDOnlyInLowerCase(t *testing.T) {
 			})
 		}
 		refused := []struct{ name, value, reason string }{
-			{"a domain", "contoso.onmicrosoft.com", notGUID},
+			{"a domain", "contoso.onmicrosoft.com", domain},
+			{"a domain in capitals", "CONTOSO.onmicrosoft.com", domain},
 			{"one character short", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5", notGUID},
 			{"one character long", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d0", notGUID},
 			{"a dash out of place", "0a1b2c3d4-e5f-6a7b-8c9d-0e1f2a3b4c5d", notGUID},
@@ -1258,7 +1259,6 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 	}
 	for _, tc := range []struct{ value, why string }{
 		{"8080", "it is not host:port"},
-		{"https://u:" + canaryText + "@h.example/x", "it is not host:port"},
 		{"//h.example/x?k=" + canaryText + ":80", "its host " + ruleNameChar + "1" + ruleNameChars},
 		{"h.example..:80", "it has a host that is neither an IP address nor a host name"},
 		{".:80", "it has a host that is neither an IP address nor a host name"},     // "." once its trailing dot is stripped

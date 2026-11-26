@@ -3,6 +3,7 @@ package gate
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -85,6 +86,8 @@ func TestDenialNeverRevealsTheIdentity(t *testing.T) {
 	}
 }
 
+// An invalid gate is refused with the reason, and never with the entry it refused or the IdP it does
+// not know: config refuses an entry first, by its place and length (#495), and this is the backstop.
 func TestInvalidGateIsRefusedWithTheReason(t *testing.T) {
 	for name, tc := range map[string]struct {
 		rules Rules
@@ -123,6 +126,12 @@ func TestInvalidGateIsRefusedWithTheReason(t *testing.T) {
 			_, _, err := New(tc.rules, tc.opts)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			r := tc.rules
+			for _, e := range slices.Concat(r.Tenants, r.Roles, r.Groups, r.EmailDomains, r.HostedDomains, []string{tc.opts.IdP}) {
+				if len(e) >= 4 && e != Entra && e != Google && e != Generic && strings.Contains(err.Error(), e) {
+					t.Errorf("err = %v, shows %q, which the rules or options gave", err, e)
+				}
 			}
 		})
 	}

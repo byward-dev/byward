@@ -82,6 +82,10 @@ func (s Setting) Secret() bool { return s.shape == secretShape }
 // but the secret has the secret shape, so HoldsPath is false for it; PathVariables lists its file.
 func (s Setting) HoldsPath() bool { return s.shape == pathShape }
 
+// IsList reports whether the setting's value is a comma-separated list, so that no entry of it holds
+// a comma. Its shape decides it.
+func (s Setting) IsList() bool { return s.shape == listShape || s.shape == urlListShape }
+
 // PathVariables are the environment variables whose values are paths: each path setting's, and each
 // secret's `<ENV>_FILE` (security invariant 2, #587). A test requires a leak-test scenario for each.
 func PathVariables() []string {
@@ -203,6 +207,15 @@ type configError struct{ msg string }
 func (e *configError) Error() string { return e.msg }
 
 func errorf(format string, a ...any) error { return &configError{msg: fmt.Sprintf(format, a...)} }
+
+// joinErrors is errs as one config error, each refusal joined by "; ".
+func joinErrors(errs []error) error {
+	msgs := make([]string, 0, len(errs))
+	for _, e := range errs {
+		msgs = append(msgs, e.Error())
+	}
+	return &configError{msg: strings.Join(msgs, "; ")}
+}
 
 // bothSet is the refusal of two settings, or two forms of one, given where one is wanted.
 func bothSet(a, b string) error { return errorf("%s and %s are both set; give one of them", a, b) }

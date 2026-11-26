@@ -156,13 +156,14 @@ func TestARefusedURLIsNeverShownButSaysWhy(t *testing.T) {
 		{"BYWARD_UPSTREAM_URL=ftp://up.example/x?k=pw", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (23 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 		{"BYWARD_UPSTREAM_URL=up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (12 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 		{"BYWARD_UPSTREAM_URL=https://user:pw@up stream/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (27 characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20 (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_ALLOWED_ORIGINS=https://user:pw@app.example", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (27 characters, not shown): it holds a user name or password`},
+		// A password in a setting shown as given is refused by its kind first (#495).
+		{"BYWARD_ALLOWED_ORIGINS=https://user:pw@app.example", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want a value that is not a secret (give a secret only in a secret setting's file); got a value (27 characters, not shown): it looks like a connection string with a password`},
 		{"BYWARD_ALLOWED_ORIGINS=https://app.example?t=pw", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (24 characters, not shown): it has a query or a fragment`},
 		{"BYWARD_CLIENT_DENYLIST=https://user:pw@app.example/c.json", withConfig(t), `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (34 characters, not shown): it is a CIMD client ID with a user name or password`},
 		{"BYWARD_CLIENT_DENYLIST=https://app.example/c.json?v=pw", withConfig(t), `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (31 characters, not shown): it is a CIMD client ID with a query or a fragment`},
 		{"BYWARD_CLIENT_DENYLIST=https://app.example/%zz@x", withConfig(t), `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (25 characters, not shown): it is not an absolute URL`},
 		{"BYWARD_ALLOWED_HOSTS=ü:pw@app.example", withConfig(t), `BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (16 characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`},
-		{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read https://user:pw@other.example/x", withConfig(t), `BYWARD_OBO_SCOPES: want scope URIs of one API such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>; got entries 1 and 2 of 2: they are for different APIs; Entra issues a token for one API per request`},
+		{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read https://user:pw@other.example/x", withConfig(t), `BYWARD_OBO_SCOPES: want a value that is not a secret (give a secret only in a secret setting's file); got a value (69 characters, not shown): it looks like a connection string with a password`},
 		{"BYWARD_OIDC_ISSUER=https://user:pw@idp.example", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (27 characters, not shown): it holds a user name or password`},
 		{"BYWARD_OIDC_ISSUER=http://user:pw@127.0.0.1:8081", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (29 characters, not shown): it holds a user name or password`},
 		{"BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme?k=pw", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (40 characters, not shown): it has a query or a fragment, which an issuer never has`},
@@ -379,14 +380,15 @@ func TestAFlagTheFlagPackageRefusesNeverShowsTheTextGiven(t *testing.T) {
 // secret setting is read from a file, which that test writes; a line naming the setting otherwise
 // ("BYWARD_X is set without …") refuses its context, not a value.
 func TestNoRefusalShowsTheValueGiven(t *testing.T) {
-	forms := []string{"https://u:" + canaryText + "@h.example/x", canaryText, "X-Api-Key: " + canaryText, "a " + canaryText,
+	secretForm := "https://u:" + canaryText + "@h.example/x" // a connection string with a password: refused by its kind (#495)
+	forms := []string{secretForm, canaryText, "X-Api-Key: " + canaryText, "a " + canaryText,
 		"+" + canaryText, canaryText + "=5", "authorize=" + canaryText, "1" + canaryText, "\"" + canaryText + "\""}
-	// The settings config refuses none of these forms for: free text, client IDs, claim and role names,
-	// and the gate and app lists. Every other setting must refuse one in the one format, so the test cannot
-	// pass by no longer reaching its parser. Those listed must load with every form, so a context that
-	// stops reaching them fails too.
-	acceptsEveryForm := []string{"app-client-ids", "app-roles", "gate-email-domains", "gate-groups",
-		"gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key-id", "oidc-groups-claim",
+	// The settings config refuses none of these forms for, but secretForm, which every setting that is
+	// not secret refuses as a secret's kind (#495): free text, the OIDC client ID and key ID, and claim
+	// names. Every other setting must refuse one in the one format, so the test
+	// cannot pass by no longer reaching its parser. Those listed must load with every other form, so a
+	// context that stops reaching them fails too.
+	acceptsEveryForm := []string{"oidc-client-id", "oidc-client-key-id", "oidc-groups-claim",
 		"oidc-name", "oidc-roles-claim", "oidc-subject-claim", "operator-name", "resource-name", "scope-description"}
 	for _, s := range registry {
 		if s.Secret() {
@@ -399,7 +401,7 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 			if err == nil {
 				continue
 			}
-			if slices.Contains(acceptsEveryForm, s.Name) { // so a context that does not reach it fails here
+			if slices.Contains(acceptsEveryForm, s.Name) && form != secretForm { // so a context that does not reach it fails here
 				t.Errorf("%s=%q: %v; acceptsEveryForm lists it, so it must load with any form where it is read (readContextOf)", s.Env(), form, err)
 			}
 			if holdsCanary(err.Error()) {

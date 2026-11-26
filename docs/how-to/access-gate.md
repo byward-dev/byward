@@ -26,7 +26,7 @@ one entry is enough.
 
 All lists are comma-separated. An invalid entry, such as a tenant that is not a GUID or an email
 domain with Entra, or a list that is set but names nothing, stops the proxy at startup with a
-message naming the setting, for example `BYWARD_GATE_TENANTS: "contoso" is not a GUID`.
+message naming the setting, for example `BYWARD_GATE_TENANTS: want tenant IDs, each a GUID such as 00000000-0000-0000-0000-000000000000; got entry 1 of 1 (7 characters, not shown): it is not a GUID`.
 
 ## Empty gate
 

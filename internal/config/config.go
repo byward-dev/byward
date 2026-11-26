@@ -205,6 +205,9 @@ var dependentAuthSettings = []func(*Config, *Values) []error{
 // validate checks the resolved settings. container says byward runs in a container; dashes says the
 // command takes a stdio upstream command after --, so an error may suggest one.
 func validate(v *Values, container, dashes bool) (*Config, error) {
+	if errs := parseSecretKinds(v); len(errs) > 0 { // before any parser reads the value, or anything shows it
+		return nil, joinErrors(errs)
+	}
 	c := &Config{Values: v, ResourceName: parseText(v.value("resource-name")), InContainer: container}
 	var errs []error
 	var errWord error
@@ -301,11 +304,7 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 	}
 	errs = append(errs, c.headerClashes()...)
 	if len(errs) > 0 {
-		msgs := make([]string, 0, len(errs))
-		for _, e := range errs {
-			msgs = append(msgs, e.Error())
-		}
-		return nil, &configError{msg: strings.Join(msgs, "; ")}
+		return nil, joinErrors(errs)
 	}
 	return c, nil
 }

@@ -234,8 +234,8 @@ func TestTheDiagnosedCredentialIsNamedAsGiven(t *testing.T) {
 }
 
 // Server's refusals that config cannot make name each setting as the operator gave it too (#623): a
-// denylist entry registration refuses and the denylist's static client, an app role the gate refuses,
-// the stdio upstream's command and its environment file, and On-Behalf-Of's token socket. Each case
+// denylist entry registration refuses and the denylist's static client (an app role is refused by
+// config, by its entry rule, #495), the stdio upstream's command and its environment file, and On-Behalf-Of's token socket. Each case
 // refuses the same way by env, the control, and by flag.
 func TestAServerRefusalNamesEachSettingAsGiven(t *testing.T) {
 	const static = "https://static.example/client.json"
@@ -267,12 +267,6 @@ func TestAServerRefusalNamesEachSettingAsGiven(t *testing.T) {
 		{"a denylist entry config accepts but registration refuses, by flag", []string{"--client-denylist=good.example, https://app.example:8443/client.json"}, func(t *testing.T) []string {
 			return servedEnv(t)
 		}, false, start, "--client-denylist: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 2 of 2 (36 characters, not shown): it is not a client ID metadata document URL: only port 443 is fetched"},
-		{"an app role the gate refuses, by env", nil, func(t *testing.T) []string {
-			return append(servedEnv(t), "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=a\x7fb")
-		}, false, start, `BYWARD_APP_ROLES: "a\x7fb" is not a valid name`},
-		{"an app role the gate refuses, by flag", []string{"--app-tokens=entra", "--app-roles=a\x7fb"}, func(t *testing.T) []string {
-			return servedEnv(t)
-		}, false, start, `--app-roles: "a\x7fb" is not a valid name`},
 		{"a static client on the denylist, by env", nil, func(t *testing.T) []string {
 			return append(servedEnv(t, "BYWARD_STATIC_CLIENTS_FILE"), "BYWARD_STATIC_CLIENTS_FILE="+clients, "BYWARD_CLIENT_DENYLIST="+static)
 		}, false, start, `BYWARD_CLIENT_DENYLIST: "` + static + `" is a static client, which the denylist never refuses; remove it from BYWARD_STATIC_CLIENTS_FILE instead`},

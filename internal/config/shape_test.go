@@ -26,22 +26,22 @@ var shapesOfSettings = []shapeSettings{
 		"oidc-client-secret", "oidc-client-key", "store-postgres-dsn"}},
 	{"URL", urlShape, []string{"public-url", "upstream-url", "resource-documentation", "oidc-issuer"}},
 	{"URL list", urlListShape, []string{"client-denylist"}},
+	{"list", listShape, []string{
+		"upstream-strip-headers", "allowed-origins", "allowed-hosts", "trusted-proxies", "oauth-rate-limits",
+		"oidc-scopes", "assertion-claims", "gate-tenants", "gate-roles", "gate-groups", "gate-email-domains",
+		"gate-hosted-domains", "cimd-trusted-hosts", "cimd-allowed-hosts", "app-roles", "app-client-ids"}},
 	{"command", commandShape, []string{"upstream-command"}},
 	{"path", pathShape, []string{
 		"tls-cert-file", "tls-key-file", "entra-federated-token-file", "data-dir", "keys-dir", "assertion-keys-dir",
 		"static-clients-file", "store-dir", "store-counter-file"}},
 	{"as given", asGivenShape, []string{
-		"upstream-header-timeout", "upstream-credential-header", "upstream-strip-headers",
-		"stdio-max-processes", "stdio-max-processes-per-user", "stdio-stream-idle-timeout", "listen",
-		"allowed-origins", "allowed-hosts", "scope", "resource-name",
-		"log-format", "trusted-proxies", "oauth-rate-limits", "internal-listen", "idp", "entra-tenant",
-		"entra-client-id", "entra-client-secret-expires-at", "oidc-client-id",
-		"oidc-client-key-alg", "oidc-client-key-id", "oidc-scopes", "oidc-subject-claim", "oidc-roles-claim",
-		"oidc-groups-claim", "oidc-name", "assertion-header",
-		"identity-headers", "obo-scopes", "obo-header", "assertion-claims", "assertion-unverified-email",
-		"gate-tenants", "gate-roles", "gate-groups", "gate-email-domains",
-		"gate-hosted-domains", "dcr", "cimd", "cimd-trusted-hosts", "cimd-allowed-hosts", "app-tokens",
-		"app-roles", "app-client-ids", "gate-allow-empty", "operator-name", "scope-description", "refresh-grace", "insecure-no-auth", "dev"}},
+		"upstream-header-timeout", "upstream-credential-header", "stdio-max-processes", "stdio-max-processes-per-user",
+		"stdio-stream-idle-timeout", "listen", "scope", "resource-name", "log-format", "internal-listen",
+		"idp", "entra-tenant", "entra-client-id", "entra-client-secret-expires-at", "oidc-client-id",
+		"oidc-client-key-alg", "oidc-client-key-id", "oidc-subject-claim", "oidc-roles-claim",
+		"oidc-groups-claim", "oidc-name", "assertion-header", "identity-headers", "obo-scopes",
+		"obo-header", "assertion-unverified-email", "dcr", "cimd", "app-tokens", "gate-allow-empty",
+		"operator-name", "scope-description", "refresh-grace", "insecure-no-auth", "dev"}},
 }
 
 // Each shape is given to exactly the settings shapesOfSettings lists, and every registry setting is
@@ -92,6 +92,7 @@ func TestEachShapeShowsAnAcceptedValueByItsRule(t *testing.T) {
 		"URL list": {"https://h.example/x?k=S3CRET,bad.example", "https://h.example/x?…, bad.example"},
 		"command":  {`["/bin/server","--token","S3CRET"]`, "/bin/server (2 arguments not shown)"},
 		"as given": {"https://u:p@h.example/x?k=v", "https://u:p@h.example/x?k=v"},
+		"list":     {"a.example, b.example", "a.example, b.example"},
 		"path":     {"/var/lib/byward/keys", "/var/lib/byward/keys"},
 	}
 	for _, c := range shapesOfSettings {

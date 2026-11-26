@@ -126,9 +126,18 @@ func (c *Config) entraIdP(v *Values) []error {
 
 // parseTenant reads BYWARD_ENTRA_TENANT: the tenant ID, a GUID, or nothing (required elsewhere).
 func parseTenant(val Value) (string, error) {
+	return parseEntraID(val, "the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID)")
+}
+
+// parseEntraID reads an Entra ID setting: empty, or a GUID. A domain name is named as one
+// (guidReason), the likely mistake; a refused value is never shown (#495).
+func parseEntraID(val Value, want string) (string, error) {
 	raw := val.Given.raw()
-	if raw != "" && !isGUID(raw) {
-		return "", refusedForm(val, whole, raw, "the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID)", "it is not a GUID")
+	if raw == "" {
+		return "", nil
+	}
+	if reason := guidReason(raw); reason != "" {
+		return "", refusedForm(val, whole, raw, want, reason)
 	}
 	return raw, nil
 }
@@ -139,14 +148,11 @@ func parseTenant(val Value) (string, error) {
 // refused here is never shown: a client secret pasted in its place is the likely mistake.
 func parseEntraClientID(val Value) (string, error) {
 	const want = "the application (client) ID, a GUID in lower case such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID)"
-	switch raw := val.Given.raw(); {
-	case raw != "" && !isGUID(raw):
-		return "", refusedForm(val, whole, raw, want, "it is not a GUID")
-	case raw != strings.ToLower(raw):
-		return "", refusedForm(val, whole, raw, want, "it has upper-case letters; write it in lower case, since the ID token's audience is compared with it exactly")
-	default:
-		return raw, nil
+	raw, err := parseEntraID(val, want)
+	if err != nil || raw == strings.ToLower(raw) {
+		return raw, err
 	}
+	return "", refusedForm(val, whole, raw, want, "it has upper-case letters; write it in lower case, since the ID token's audience is compared with it exactly")
 }
 
 // protocolClaims are ID token claims about the sign-in itself, never a user's roles or groups: the

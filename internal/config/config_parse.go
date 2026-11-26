@@ -63,40 +63,40 @@ func parsePublicURL(val Value) (*url.URL, error) {
 	// The host as browsers write it: the public URL is also the issuer, the resource and the IdP
 	// redirect URI, which browser clients compare with the URL they hold, in the form they write.
 	const wantBrowserHost = "the MCP endpoint's URL with its host as browsers write it, such as " + exampleMCPURL
-	var errs []string
+	var errs []error
 	h := u.Hostname()
 	if reason := browserIPv4(h); reason != "" {
 		// A browser never sends such a host back, so its sign-in could never finish.
-		errs = append(errs, refusedForm(val, whole, raw, want, "its host "+reason).Error())
+		errs = append(errs, refusedForm(val, whole, raw, want, "its host "+reason))
 	} else if bh := host.Serialize(h); strings.Contains(h, ":") && "["+h+"]" != bh {
 		// The public URL is also the issuer, the resource and the IdP redirect URI, which browser
 		// clients compare with the URL they hold, in the form they write (#447).
-		errs = append(errs, refusedForm(val, whole, raw, wantBrowserHost, "its IPv6 address is not in the form browsers write it; write it as "+bh).Error())
+		errs = append(errs, refusedForm(val, whole, raw, wantBrowserHost, "its IPv6 address is not in the form browsers write it; write it as "+bh))
 	} else if !strings.Contains(h, ":") && h != bh {
 		// The same for a host name: a browser lower-cases it, and byward does not rewrite it, since the
 		// IdP's redirect URI is registered as written (#472).
 		// The host is not shown, not even in lower case: a token is a valid host name.
-		errs = append(errs, refusedForm(val, whole, raw, wantBrowserHost, "its host name has upper-case letters; write it in lower case, as browsers do").Error())
+		errs = append(errs, refusedForm(val, whole, raw, wantBrowserHost, "its host name has upper-case letters; write it in lower case, as browsers do"))
 	}
 	if p := u.Port(); p != "" && p == host.DefaultPort(u.Scheme) {
 		// Browsers drop a scheme's default port when they write a URL (WHATWG URL §4.4), so a browser
 		// client would hold the issuer and resource without it (#484).
 		errs = append(errs, refusedForm(val, whole, raw, "the MCP endpoint's URL with its port as browsers write it, such as "+exampleMCPURL,
-			"its port "+p+" is "+u.Scheme+"'s default, which browsers drop; write the URL without :"+p).Error())
+			"its port "+p+" is "+u.Scheme+"'s default, which browsers drop; write the URL without :"+p))
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
 		errs = append(errs, refusedMeaning(val, whole, "a path that is empty or ends in /", "the MCP endpoint's path without a trailing slash, such as "+exampleMCPURL,
-			"give the endpoint's path, without the trailing slash").Error())
+			"give the endpoint's path, without the trailing slash"))
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		errs = append(errs, refusedMeaning(val, whole, "a query or fragment, not shown", "a URL without a query or fragment, such as "+exampleMCPURL, "remove it").Error())
+		errs = append(errs, refusedMeaning(val, whole, "a query or fragment, not shown", "a URL without a query or fragment, such as "+exampleMCPURL, "remove it"))
 	}
 	// LOCALHOST is loopback too; the host name rule above already refuses its spelling.
 	if u.Scheme == "http" && !host.LoopbackAsWritten(h) {
-		errs = append(errs, refusedMeaning(val, whole, "http", "https (http only on a loopback host, with --dev), such as "+exampleMCPURL, "give https, or a loopback host").Error())
+		errs = append(errs, refusedMeaning(val, whole, "http", "https (http only on a loopback host, with --dev), such as "+exampleMCPURL, "give https, or a loopback host"))
 	}
 	if len(errs) > 0 {
-		return nil, &configError{msg: strings.Join(errs, "; ")}
+		return nil, joinErrors(errs)
 	}
 	return u, nil
 }

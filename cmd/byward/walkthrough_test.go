@@ -75,7 +75,7 @@ func TestTheWalkthroughsBrokenConfigurationsSayWhatToFix(t *testing.T) {
 			return append(without(stdioAuthEnv(t), "BYWARD_ENTRA_TENANT="), public, "BYWARD_ENTRA_TENANT=mcpteam.onmicrosoft.com",
 				"BYWARD_GATE_ROLES=MCP.User", "BYWARD_UPSTREAM_COMMAND="+string(command))
 		},
-			`byward: configuration error: BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID); got a value (23 characters, not shown): it is not a GUID`},
+			`byward: configuration error: BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID); got a value (23 characters, not shown): it looks like a domain name, not a GUID`},
 		{"10 an http issuer off loopback", func(t *testing.T) []string {
 			return append(oidcAuthEnv(t), public, upstream, "BYWARD_IDP=keycloak",
 				"BYWARD_OIDC_ISSUER=http://keycloak.example.net/realms/mcp", "BYWARD_OIDC_CLIENT_ID=byward-proxy", "BYWARD_GATE_ROLES=mcp-user")

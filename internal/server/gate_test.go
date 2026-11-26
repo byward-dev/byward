@@ -13,20 +13,20 @@ import (
 
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/gate"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
-// One case per gate list: the error names the exact setting, which proves the wiring maps each
-// list to its own setting. The gate's own rules are tested in internal/gate.
+// Each gate list the gate itself refuses (config refuses an entry of the wrong form first, #495) is
+// refused at startup naming its setting, which proves the wiring maps the gate's error to it; every
+// list's mapping is pinned in TestAGateErrorNamesTheSettingOfEachList.
 func TestInvalidGateRefusesToStartNamingTheSetting(t *testing.T) {
 	for _, setting := range []string{
 		"BYWARD_GATE_TENANTS=11111111-1111-4111-8111-111111111111", // the configured tenant is missing
-		"BYWARD_GATE_ROLES=a\x7fb",
-		"BYWARD_GATE_GROUPS=mcp-users",
-		"BYWARD_GATE_EMAIL_DOMAINS=contoso.example",
-		"BYWARD_GATE_HOSTED_DOMAINS=contoso.example",
+		"BYWARD_GATE_EMAIL_DOMAINS=contoso.example",                // not with Entra
+		"BYWARD_GATE_HOSTED_DOMAINS=contoso.example",               // only with Google
 	} {
 		name, _, _ := strings.Cut(setting, "=")
 		t.Run(name, func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestInvalidGateRefusesToStartNamingTheSetting(t *testing.T) {
 
 // A gate list given by flag is named by its flag (#623); the variable rows above are its control.
 func TestAnInvalidGateListGivenByFlagIsNamedByItsFlag(t *testing.T) {
-	for _, flag := range []string{"--gate-groups=mcp-users", "--gate-email-domains=contoso.example"} {
+	for _, flag := range []string{"--gate-tenants=11111111-1111-4111-8111-111111111111", "--gate-email-domains=contoso.example"} {
 		name, _, _ := strings.Cut(flag, "=")
 		t.Run(name, func(t *testing.T) {
 			cfg, _, err := config.Load([]string{flag}, servedEnv(t), os.ReadFile)
@@ -54,10 +54,30 @@ func TestAnInvalidGateListGivenByFlagIsNamedByItsFlag(t *testing.T) {
 	}
 }
 
+// gateError names each gate list's error by the setting that fills the list, and any other error as
+// the access gate's.
+func TestAGateErrorNamesTheSettingOfEachList(t *testing.T) {
+	var errs []error
+	want := []string{}
+	for field, env := range map[string]string{
+		gate.FieldTenants: "BYWARD_GATE_TENANTS", gate.FieldRoles: "BYWARD_GATE_ROLES", gate.FieldGroups: "BYWARD_GATE_GROUPS",
+		gate.FieldEmailDomains: "BYWARD_GATE_EMAIL_DOMAINS", gate.FieldHostedDomains: "BYWARD_GATE_HOSTED_DOMAINS",
+		gate.FieldAllowEmpty: "BYWARD_GATE_ALLOW_EMPTY", gate.FieldAppRoles: "BYWARD_APP_ROLES", gate.FieldAppClientIDs: "BYWARD_APP_CLIENT_IDS",
+	} {
+		errs = append(errs, &gate.FieldError{Field: field, Msg: "m"})
+		want = append(want, env+": m")
+	}
+	errs = append(errs, errors.New("unknown IdP"))
+	want = append(want, "access gate: unknown IdP")
+	if got := gateError(loadConfig(t, "https://m.example/mcp"), errors.Join(errs...)).Error(); got != strings.Join(want, "; ") {
+		t.Fatalf("got  %s\nwant %s", got, strings.Join(want, "; "))
+	}
+}
+
 func TestEveryInvalidGateListIsReported(t *testing.T) {
-	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_GATE_GROUPS=mcp-users", "BYWARD_GATE_EMAIL_DOMAINS=contoso.example")
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_GATE_EMAIL_DOMAINS=contoso.example", "BYWARD_GATE_HOSTED_DOMAINS=contoso.example")
 	_, err := New(cfg, logging.New(io.Discard, "json"))
-	if err == nil || !strings.Contains(err.Error(), "BYWARD_GATE_GROUPS: ") || !strings.Contains(err.Error(), "; BYWARD_GATE_EMAIL_DOMAINS: ") {
+	if err == nil || !strings.Contains(err.Error(), "BYWARD_GATE_EMAIL_DOMAINS: ") || !strings.Contains(err.Error(), "; BYWARD_GATE_HOSTED_DOMAINS: ") {
 		t.Fatalf("err = %v, want both settings named", err)
 	}
 }

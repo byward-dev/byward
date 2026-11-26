@@ -43,6 +43,10 @@ var (
 	// urlListShape is a comma-separated list whose entries can be URLs: each URL entry is shown as
 	// urlShape shows it, and any other entry as asGivenShape shows it.
 	urlListShape = newShape(displayURLList, notShown)
+	// listShape is a comma-separated list whose entries are not URLs: shown as given, as asGivenShape
+	// is. It differs only by identity (Setting.IsList): no entry holds a comma, so a secret is
+	// looked for in each entry on its own (parseSecretKinds).
+	listShape = newShape(displayAsGiven, notShown)
 	// commandShape is a command line as a JSON array: shown by its program and how many arguments
 	// follow, since an argument can be a token (displayCommand).
 	commandShape = newShape(displayCommand, notShown)

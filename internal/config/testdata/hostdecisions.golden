@@ -1171,7 +1171,7 @@ refused because:
     338  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "%" not followed by two hexadecimal digits
     228  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a control character, which a URL cannot hold
     169  BYWARD_ALLOWED_ORIGINS: want only loopback origins with BYWARD_INSECURE_NO_AUTH, such as http://localhost:3000; got a host name, not shown: authentication is off, so only loopback may reach the proxy
-    134  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it holds a user name or password
+    133  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it holds a user name or password
     120  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
      96  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a %-escape in its host, which a host name cannot hold
      84  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
@@ -1200,5 +1200,6 @@ refused because:
       2  BYWARD_ALLOWED_ORIGINS: want only loopback origins with BYWARD_INSECURE_NO_AUTH, such as http://localhost:3000; got the address ::ffff:7f00:1:80: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_ORIGINS: want only loopback origins with BYWARD_INSECURE_NO_AUTH, such as http://localhost:3000; got the address fd00::17:80: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_ORIGINS: want only loopback origins with BYWARD_INSECURE_NO_AUTH, such as http://localhost:3000; got the address fe80::1:80: authentication is off, so only loopback may reach the proxy
+      1  BYWARD_ALLOWED_ORIGINS: want a value that is not a secret (give a secret only in a secret setting's file); got a value (N characters, not shown): it looks like a connection string with a password
       1  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a scheme other than http or https
       1  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has no scheme such as https://
