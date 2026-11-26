@@ -106,5 +106,6 @@ func isEscape(s string) bool {
 	return len(s) == 3 && s[0] == '%' && err == nil
 }
 
-// isDigits reports whether s is ASCII digits only, at least one.
+// isDigits reports whether s is ASCII digits only, at least one. It is a copy of config's isDigits
+// (internal/config/config_parse.go), the second caller of one: a third extracts them into one.
 func isDigits(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
