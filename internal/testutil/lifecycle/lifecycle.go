@@ -19,14 +19,15 @@ const (
 	UpstreamGone               // the upstream or its process goes away: exit, crash, reset, closed pipe
 	Timeout                    // a bound the component sets runs out
 	Shutdown                   // the proxy shuts down
+	endings                    // the count; a new Ending goes above it
 )
 
 // Endings are every Ending, in order.
-var Endings = []Ending{Completes, ClientGone, UpstreamGone, Timeout, Shutdown}
+var Endings = upTo(endings)
 
-func (e Ending) String() string {
-	return [...]string{"completes", "client gone", "upstream gone", "timeout", "shutdown"}[e]
-}
+var endingNames = [endings]string{"completes", "client gone", "upstream gone", "timeout", "shutdown"}
+
+func (e Ending) String() string { return endingNames[e] }
 
 // A State is where a request's work is when it ends.
 type State int
@@ -39,13 +40,24 @@ const (
 	Streaming                     // the response has started; its body is still in flight
 	TrailerPending                // the response body is sent; its trailers are not
 	UpgradeRequested              // the client asked for a protocol upgrade
+	states                        // the count; a new State goes above it
 )
 
 // States are every State, in order.
-var States = []State{NotStarted, BodyInFlight, AwaitingHeaders, After1xx, Streaming, TrailerPending, UpgradeRequested}
+var States = upTo(states)
 
-func (s State) String() string {
-	return [...]string{"not started", "body in flight", "awaiting headers", "after 1xx", "streaming", "trailer pending", "upgrade requested"}[s]
+var stateNames = [states]string{"not started", "body in flight", "awaiting headers", "after 1xx", "streaming", "trailer pending", "upgrade requested"}
+
+func (s State) String() string { return stateNames[s] }
+
+// upTo is every value below n, so Endings and States cannot leave out a constant declared above
+// their count.
+func upTo[T ~int](n T) []T {
+	out := make([]T, n)
+	for i := range out {
+		out[i] = T(i)
+	}
+	return out
 }
 
 // A Cell is one (Ending, State) pair.

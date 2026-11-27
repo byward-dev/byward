@@ -57,3 +57,16 @@ func TestEveryEndingAndStateHasAName(t *testing.T) {
 		t.Errorf("names %q: want each one, distinct", names)
 	}
 }
+
+// Run runs every Pinned and KnownResidual cell, each once, and no other.
+func TestRunRunsEveryCellThatHasARun(t *testing.T) {
+	m := full()
+	ran := map[Cell]int{}
+	pinned, residual := Cell{Ending: Completes, State: Streaming}, Cell{Ending: Shutdown, State: After1xx}
+	m[pinned] = Pinned(func(*testing.T) { ran[pinned]++ })
+	m[residual] = KnownResidual("#1", "why", func(*testing.T) { ran[residual]++ })
+	Run(t, m)
+	if len(ran) != 2 || ran[pinned] != 1 || ran[residual] != 1 {
+		t.Errorf("ran %v; want the pinned and the residual cell once each", ran)
+	}
+}

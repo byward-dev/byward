@@ -3,7 +3,6 @@ package relay
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -24,9 +23,15 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
-// lifecycleBound is how long a cell waits for an event: 100 times the header timeout, so a loaded
-// machine running -race -count=50 does not flake, and nothing asserts how short a wait was.
-const lifecycleBound = 100 * headerTimeout
+// after1xxTimeout is the header timeout of the timeout × after-1xx cell. A 1xx does not reset the
+// transport's header timer, so the relayed 1xx must reach the client inside it; headerTimeout's
+// 50 ms lets a stalled machine fire the timer first.
+const after1xxTimeout = 500 * time.Millisecond
+
+// boundFor is how long a cell waits for an event: 100 times its header timeout (headerTimeout for a
+// cell without one), so a loaded machine running -race -count=50 does not flake, nothing asserts how
+// short a wait was, and a package of failing cells still names each before the test binary's timeout.
+func boundFor(timeout time.Duration) time.Duration { return 100 * max(timeout, headerTimeout) }
 
 // toolsList is the request every cell sends: one a header timeout answers with a JSON-RPC error.
 const toolsList = `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
@@ -81,7 +86,6 @@ func newRelayRig(t *testing.T, state lifecycle.State, timeout time.Duration) *re
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) }) // runs before up.Close, so a held upstream never hangs the test
 	up.Live = true
 	up.Handler = func(w http.ResponseWriter, req *http.Request) {
 		rc := http.NewResponseController(w)
@@ -163,6 +167,9 @@ func newRelayRig(t *testing.T, state lifecycle.State, timeout time.Duration) *re
 	r.srv.Config.BaseContext = func(net.Listener) context.Context { return base }
 	r.srv.Start()
 	t.Cleanup(r.srv.Close)
+	// Cleanups run last first: releasing a held upstream before the proxy's Close lets the relay's
+	// handler return, so a handler that never returns fails its cell instead of hanging the package.
+	t.Cleanup(func() { close(release) })
 	return r
 }
 
@@ -182,7 +189,11 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 	timeout := time.Duration(0)
 	if end == lifecycle.Timeout {
 		timeout = headerTimeout // real time: the transport's own bound, waited on as an event
+		if state == lifecycle.After1xx {
+			timeout = after1xxTimeout
+		}
 	}
+	bound := boundFor(timeout)
 	r := newRelayRig(t, state, timeout)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -231,7 +242,7 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 	for what, ch := range map[string]chan struct{}{"the upstream": r.reached, "the client": atClient} {
 		select {
 		case <-ch:
-		case <-time.After(lifecycleBound):
+		case <-time.After(bound):
 			t.Fatalf("%s never had the work %s", what, state)
 		}
 	}
@@ -254,7 +265,7 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 	var res clientResult
 	select {
 	case res = <-got:
-	case <-time.After(lifecycleBound):
+	case <-time.After(bound):
 		t.Fatal("the client got no answer")
 	}
 	if rest != nil {
@@ -264,7 +275,7 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 	go func() { r.srv.Close(); close(closed) }() // waits for the handler, so its slot and log are done
 	select {
 	case <-closed:
-	case <-time.After(lifecycleBound):
+	case <-time.After(bound):
 		t.Fatal("the relay's handler never returned: its slot is still held")
 	}
 	if res.status != want.status || res.cut != want.cut || !strings.Contains(res.body, want.body) {
@@ -277,7 +288,7 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 	if want.drop {
 		select {
 		case <-r.dropped:
-		case <-time.After(lifecycleBound):
+		case <-time.After(bound):
 			t.Error("the upstream request was not ended")
 		}
 	}
@@ -299,20 +310,20 @@ func checkRelayLog(t *testing.T, log string, want relayCell) {
 			}
 		case rec["level"] == "WARN" || rec["level"] == "ERROR":
 			warns++
-			if want.warn == "" || !strings.Contains(msg, want.warn) {
-				t.Errorf("logged %s %q; want %s", rec["level"], msg, map[bool]string{true: "no warning", false: "only " + strconvQuote(want.warn)}[want.warn == ""])
+			if want.warn == "" {
+				t.Errorf("logged %s %q; want no warning", rec["level"], msg)
+			} else if !strings.Contains(msg, want.warn) {
+				t.Errorf("logged %s %q; want only %q", rec["level"], msg, want.warn)
 			}
 		}
 	}
 	if lines != 1 {
 		t.Errorf("%d request lines; want 1:\n%s", lines, log)
 	}
-	if want.warn != "" && warns == 0 {
-		t.Errorf("no warning; want %q:\n%s", want.warn, log)
+	if want.warn != "" && warns != 1 {
+		t.Errorf("%d warnings; want one %q:\n%s", warns, want.warn, log)
 	}
 }
-
-func strconvQuote(s string) string { b, _ := json.Marshal(s); return string(b) }
 
 // notStarted serves one request whose context already ended, or whose upstream refuses the dial,
 // before the relay sends anything upstream.
@@ -357,60 +368,70 @@ func TestTheRelayLifecycleMatrix(t *testing.T) {
 		shutting    = "the proxy is shutting down"
 		timedOut    = "upstream did not answer in time"
 	)
-	cell := func(state lifecycle.State, end lifecycle.Ending, want relayCell) lifecycle.Case {
-		return lifecycle.Pinned(func(t *testing.T) { runRelayCell(t, state, end, want) })
-	}
-	before := func(end lifecycle.Ending, want relayCell) lifecycle.Case {
-		return lifecycle.Pinned(func(t *testing.T) { notStarted(t, end, want) })
-	}
 	afterBody := "the header timeout starts once the request is written (timeout.go), so none applies while its body is in flight; the server's ReadTimeout bounds a stalled upload"
 	noStreamBound := "the header timeout ends with the response's headers; nothing bounds a streamed body, by design (TestHeaderTimeoutDoesNotLimitAStreamedBody)"
 	stripped := "the relay strips the client's upgrade before the request leaves (relay.go Rewrite), so it is an ordinary request, whose endings are the other columns'"
 	at := func(end lifecycle.Ending, state lifecycle.State) lifecycle.Cell {
 		return lifecycle.Cell{Ending: end, State: state}
 	}
+	// Each pinned cell is named once, by its key, so a row cannot run one cell under another's name.
+	pinned := map[lifecycle.Cell]relayCell{
+		at(lifecycle.ClientGone, lifecycle.NotStarted):   {status: 499, logged: 499},
+		at(lifecycle.UpstreamGone, lifecycle.NotStarted): {status: http.StatusBadGateway, body: unavailable, logged: 502, warn: upErr},
+		at(lifecycle.Shutdown, lifecycle.NotStarted):     {status: http.StatusServiceUnavailable, body: shutting, logged: 503},
+
+		at(lifecycle.Completes, lifecycle.BodyInFlight):    {status: 200, body: "ok", logged: 200},
+		at(lifecycle.ClientGone, lifecycle.BodyInFlight):   {logged: 499, drop: true},
+		at(lifecycle.UpstreamGone, lifecycle.BodyInFlight): {status: 502, body: unavailable, logged: 502, warn: upErr},
+		at(lifecycle.Shutdown, lifecycle.BodyInFlight):     {status: 503, body: shutting, logged: 503, drop: true},
+
+		at(lifecycle.Completes, lifecycle.AwaitingHeaders):    {status: 200, body: "ok", logged: 200},
+		at(lifecycle.ClientGone, lifecycle.AwaitingHeaders):   {logged: 499, drop: true},
+		at(lifecycle.UpstreamGone, lifecycle.AwaitingHeaders): {status: 502, body: unavailable, logged: 502, warn: upErr},
+		at(lifecycle.Timeout, lifecycle.AwaitingHeaders):      {status: 200, body: `"upstreamTimeout":true`, logged: 200, warn: timedOut, drop: true},
+		at(lifecycle.Shutdown, lifecycle.AwaitingHeaders):     {status: 503, body: shutting, logged: 503, drop: true},
+
+		at(lifecycle.Completes, lifecycle.After1xx):    {status: 200, body: "ok", logged: 200},
+		at(lifecycle.ClientGone, lifecycle.After1xx):   {logged: 499, drop: true},
+		at(lifecycle.UpstreamGone, lifecycle.After1xx): {status: 502, body: unavailable, logged: 502, warn: upErr},
+		at(lifecycle.Timeout, lifecycle.After1xx):      {status: 200, body: `"upstreamTimeout":true`, logged: 200, warn: timedOut, drop: true},
+		at(lifecycle.Shutdown, lifecycle.After1xx):     {status: 503, body: shutting, logged: 503, drop: true},
+
+		at(lifecycle.Completes, lifecycle.Streaming):    {status: 200, body: "data: a\n\ndata: b\n\n", logged: 200},
+		at(lifecycle.ClientGone, lifecycle.Streaming):   {status: 200, cut: true, logged: 200, errTyp: string(logging.ClientClosed), drop: true},
+		at(lifecycle.UpstreamGone, lifecycle.Streaming): {status: 200, cut: true, logged: 200, errTyp: string(logging.UpstreamAborted), warn: upErr},
+		at(lifecycle.Shutdown, lifecycle.Streaming):     {status: 200, cut: true, logged: 200, errTyp: string(logging.ShutDown), drop: true},
+
+		at(lifecycle.Completes, lifecycle.TrailerPending):    {status: 200, body: "body", logged: 200},
+		at(lifecycle.ClientGone, lifecycle.TrailerPending):   {status: 200, cut: true, logged: 200, errTyp: string(logging.ClientClosed), drop: true},
+		at(lifecycle.UpstreamGone, lifecycle.TrailerPending): {status: 200, cut: true, logged: 200, errTyp: string(logging.UpstreamAborted), warn: upErr},
+		at(lifecycle.Shutdown, lifecycle.TrailerPending):     {status: 200, cut: true, logged: 200, errTyp: string(logging.ShutDown), drop: true},
+
+		at(lifecycle.Completes, lifecycle.UpgradeRequested):    {status: 200, body: "ok", logged: 200},
+		at(lifecycle.UpstreamGone, lifecycle.UpgradeRequested): {status: 502, logged: 502, warn: upErr},
+	}
 	m := map[lifecycle.Cell]lifecycle.Case{
-		at(lifecycle.Completes, lifecycle.NotStarted):    lifecycle.Unreachable("a request that completes was sent to the upstream"),
-		at(lifecycle.ClientGone, lifecycle.NotStarted):   before(lifecycle.ClientGone, relayCell{status: 499, logged: 499}),
-		at(lifecycle.UpstreamGone, lifecycle.NotStarted): before(lifecycle.UpstreamGone, relayCell{status: http.StatusBadGateway, body: unavailable, logged: 502, warn: upErr}),
-		at(lifecycle.Timeout, lifecycle.NotStarted):      lifecycle.NotRun("the dial bound is the transport's 10 s; a refused dial is the upstream-gone cell"),
-		at(lifecycle.Shutdown, lifecycle.NotStarted):     before(lifecycle.Shutdown, relayCell{status: http.StatusServiceUnavailable, body: shutting, logged: 503}),
+		at(lifecycle.Completes, lifecycle.NotStarted): lifecycle.Unreachable("a request that completes was sent to the upstream"),
+		at(lifecycle.Timeout, lifecycle.NotStarted):   lifecycle.NotRun("the dial bound is the transport's 10 s; a refused dial is the upstream-gone cell"),
 
-		at(lifecycle.Completes, lifecycle.BodyInFlight):    cell(lifecycle.BodyInFlight, lifecycle.Completes, relayCell{status: 200, body: "ok", logged: 200}),
-		at(lifecycle.ClientGone, lifecycle.BodyInFlight):   cell(lifecycle.BodyInFlight, lifecycle.ClientGone, relayCell{logged: 499, drop: true}),
-		at(lifecycle.UpstreamGone, lifecycle.BodyInFlight): cell(lifecycle.BodyInFlight, lifecycle.UpstreamGone, relayCell{status: 502, body: unavailable, logged: 502, warn: upErr}),
-		at(lifecycle.Timeout, lifecycle.BodyInFlight):      lifecycle.Unreachable(afterBody),
-		at(lifecycle.Shutdown, lifecycle.BodyInFlight):     cell(lifecycle.BodyInFlight, lifecycle.Shutdown, relayCell{status: 503, body: shutting, logged: 503, drop: true}),
+		at(lifecycle.Timeout, lifecycle.BodyInFlight): lifecycle.Unreachable(afterBody),
 
-		at(lifecycle.Completes, lifecycle.AwaitingHeaders):    cell(lifecycle.AwaitingHeaders, lifecycle.Completes, relayCell{status: 200, body: "ok", logged: 200}),
-		at(lifecycle.ClientGone, lifecycle.AwaitingHeaders):   cell(lifecycle.AwaitingHeaders, lifecycle.ClientGone, relayCell{logged: 499, drop: true}),
-		at(lifecycle.UpstreamGone, lifecycle.AwaitingHeaders): cell(lifecycle.AwaitingHeaders, lifecycle.UpstreamGone, relayCell{status: 502, body: unavailable, logged: 502, warn: upErr}),
-		at(lifecycle.Timeout, lifecycle.AwaitingHeaders):      cell(lifecycle.AwaitingHeaders, lifecycle.Timeout, relayCell{status: 200, body: `"upstreamTimeout":true`, logged: 200, warn: timedOut, drop: true}),
-		at(lifecycle.Shutdown, lifecycle.AwaitingHeaders):     cell(lifecycle.AwaitingHeaders, lifecycle.Shutdown, relayCell{status: 503, body: shutting, logged: 503, drop: true}),
+		at(lifecycle.Timeout, lifecycle.Streaming): lifecycle.Unreachable(noStreamBound),
 
-		at(lifecycle.Completes, lifecycle.After1xx):    cell(lifecycle.After1xx, lifecycle.Completes, relayCell{status: 200, body: "ok", logged: 200}),
-		at(lifecycle.ClientGone, lifecycle.After1xx):   cell(lifecycle.After1xx, lifecycle.ClientGone, relayCell{logged: 499, drop: true}),
-		at(lifecycle.UpstreamGone, lifecycle.After1xx): cell(lifecycle.After1xx, lifecycle.UpstreamGone, relayCell{status: 502, body: unavailable, logged: 502, warn: upErr}),
-		at(lifecycle.Timeout, lifecycle.After1xx):      cell(lifecycle.After1xx, lifecycle.Timeout, relayCell{status: 200, body: `"upstreamTimeout":true`, logged: 200, warn: timedOut, drop: true}),
-		at(lifecycle.Shutdown, lifecycle.After1xx):     cell(lifecycle.After1xx, lifecycle.Shutdown, relayCell{status: 503, body: shutting, logged: 503, drop: true}),
+		at(lifecycle.Timeout, lifecycle.TrailerPending): lifecycle.Unreachable(noStreamBound),
 
-		at(lifecycle.Completes, lifecycle.Streaming):    cell(lifecycle.Streaming, lifecycle.Completes, relayCell{status: 200, body: "data: a\n\ndata: b\n\n", logged: 200}),
-		at(lifecycle.ClientGone, lifecycle.Streaming):   cell(lifecycle.Streaming, lifecycle.ClientGone, relayCell{status: 200, cut: true, logged: 200, errTyp: string(logging.ClientClosed), drop: true}),
-		at(lifecycle.UpstreamGone, lifecycle.Streaming): cell(lifecycle.Streaming, lifecycle.UpstreamGone, relayCell{status: 200, cut: true, logged: 200, errTyp: string(logging.UpstreamAborted), warn: upErr}),
-		at(lifecycle.Timeout, lifecycle.Streaming):      lifecycle.Unreachable(noStreamBound),
-		at(lifecycle.Shutdown, lifecycle.Streaming):     cell(lifecycle.Streaming, lifecycle.Shutdown, relayCell{status: 200, cut: true, logged: 200, errTyp: string(logging.ShutDown), drop: true}),
-
-		at(lifecycle.Completes, lifecycle.TrailerPending):    cell(lifecycle.TrailerPending, lifecycle.Completes, relayCell{status: 200, body: "body", logged: 200}),
-		at(lifecycle.ClientGone, lifecycle.TrailerPending):   cell(lifecycle.TrailerPending, lifecycle.ClientGone, relayCell{status: 200, cut: true, logged: 200, errTyp: string(logging.ClientClosed), drop: true}),
-		at(lifecycle.UpstreamGone, lifecycle.TrailerPending): cell(lifecycle.TrailerPending, lifecycle.UpstreamGone, relayCell{status: 200, cut: true, logged: 200, errTyp: string(logging.UpstreamAborted), warn: upErr}),
-		at(lifecycle.Timeout, lifecycle.TrailerPending):      lifecycle.Unreachable(noStreamBound),
-		at(lifecycle.Shutdown, lifecycle.TrailerPending):     cell(lifecycle.TrailerPending, lifecycle.Shutdown, relayCell{status: 200, cut: true, logged: 200, errTyp: string(logging.ShutDown), drop: true}),
-
-		at(lifecycle.Completes, lifecycle.UpgradeRequested):    cell(lifecycle.UpgradeRequested, lifecycle.Completes, relayCell{status: 200, body: "ok", logged: 200}),
-		at(lifecycle.ClientGone, lifecycle.UpgradeRequested):   lifecycle.Unreachable(stripped),
-		at(lifecycle.UpstreamGone, lifecycle.UpgradeRequested): cell(lifecycle.UpgradeRequested, lifecycle.UpstreamGone, relayCell{status: 502, logged: 502, warn: upErr}),
-		at(lifecycle.Timeout, lifecycle.UpgradeRequested):      lifecycle.Unreachable(stripped),
-		at(lifecycle.Shutdown, lifecycle.UpgradeRequested):     lifecycle.Unreachable(stripped),
+		at(lifecycle.ClientGone, lifecycle.UpgradeRequested): lifecycle.Unreachable(stripped),
+		at(lifecycle.Timeout, lifecycle.UpgradeRequested):    lifecycle.Unreachable(stripped),
+		at(lifecycle.Shutdown, lifecycle.UpgradeRequested):   lifecycle.Unreachable(stripped),
+	}
+	for c, want := range pinned {
+		m[c] = lifecycle.Pinned(func(t *testing.T) {
+			if c.State == lifecycle.NotStarted {
+				notStarted(t, c.Ending, want)
+				return
+			}
+			runRelayCell(t, c.State, c.Ending, want)
+		})
 	}
 	lifecycle.Run(t, m)
 }
