@@ -89,6 +89,7 @@ func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {
 	}
 }
 
+// Lifecycle cell upstream gone / not started (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestRelayHidesUpstreamErrors(t *testing.T) {
 	gone := httptest.NewServer(http.NotFoundHandler())
 	gone.Close() // a URL nothing listens on any more
@@ -296,6 +297,7 @@ func sendWithTrailer(t *testing.T, srv *httptest.Server, name, body string) int 
 // The upstream's response trailers never reach the MCP client, announced or not, the headers the relay
 // cleans included: they arrive after the body, out of reach of that cleaning and of the session
 // binding.
+// Lifecycle cell completes / trailer pending (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestRelayDropsUpstreamTrailers(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -337,6 +339,7 @@ func TestRelayDropsUpstreamTrailers(t *testing.T) {
 
 // A client's request to switch protocols never reaches the upstream, whatever the method: MCP never
 // upgrades, and the raw connection would bypass the session binding.
+// Lifecycle cell completes / upgrade requested (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestAClientsUpgradeRequestNeverReachesTheUpstream(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
@@ -367,6 +370,7 @@ func TestAClientsUpgradeRequestNeverReachesTheUpstream(t *testing.T) {
 // raw Mcp-Session-Id, never a raw connection past the session binding), and the operator a log line
 // saying why. With the client's Upgrade already stripped, ReverseProxy itself would refuse the 101
 // too; the log line is what pins the relay's own refusal.
+// Lifecycle cell upstream gone / upgrade requested (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestAnUpstreamThatSwitchesProtocolsGetsTheClientA502(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -471,6 +475,7 @@ func TestAnUpstreamsInformationalResponsesCarryOnlyLinkAndTheSession(t *testing.
 // an upstream's 1xx, which ReverseProxy clears the header map after, whatever final response follows:
 // the upstream's own, a failure it sends, or the relay's 502 when it hangs up. They never override a
 // header the upstream's final response sets, and the upstream's own CORS headers stay dropped.
+// Lifecycle cell completes and upstream gone / after 1xx (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestTheProxysOwnHeadersSurviveAnUpstreamsInformationalResponse(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -542,6 +547,7 @@ func TestTheProxysOwnHeadersSurviveAnUpstreamsInformationalResponse(t *testing.T
 
 // The proxy's own headers also survive when the answer after a 1xx is the relay's own body with no
 // status written first: the header-timeout answer to an upstream that sent a 103 and then nothing.
+// Lifecycle cell timeout / after 1xx (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestTheProxysOwnHeadersSurviveATimeoutAfterAnInformationalResponse(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
@@ -873,6 +879,7 @@ func TestABodyOverTheLimitIsAnswered413WhateverTheProxySetting(t *testing.T) {
 // warning to the request. Two requests at once on one relay each get their own ID. Through a proxy
 // whose setting Go misread the warning names the cause, never the address Go dialled; through a
 // well-formed proxy, or none, it shows ReverseProxy's line, which quotes that address.
+// Lifecycle cell upstream gone / streaming (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisreadProxysAddress(t *testing.T) {
 	const requests = 2
 	for _, tc := range everyProxySetting {
@@ -955,6 +962,7 @@ func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisread
 // misread one too, whose redaction must keep the body read's bare context.Canceled, which quotes no
 // address. ReverseProxy compares that error with context.Canceled by identity to stay quiet when the
 // client went away; any other error is logged as an upstream error (#388).
+// Lifecycle cell client gone / streaming (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestAClientThatCancelsAStreamLogsOnlyItsCutOffRequestLineWhateverTheProxySetting(t *testing.T) {
 	const event = "data: {}\n\n"
 	for _, tc := range everyProxySetting {
@@ -1003,6 +1011,7 @@ func TestAClientThatCancelsAStreamLogsOnlyItsCutOffRequestLineWhateverTheProxySe
 // setting: nothing is logged as one, and the request records 499, nginx's "client closed request",
 // so the request log, the metrics and the span do not count an upstream failure (#527). Before #527
 // the relay logged "upstream error" with context canceled and recorded 502.
+// Lifecycle cell client gone / awaiting headers (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestAClientThatGoesAwayBeforeTheUpstreamAnswersRecords499AndLogsNoUpstreamErrorWhateverTheProxySetting(t *testing.T) {
 	for _, tc := range everyProxySetting {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1054,6 +1063,7 @@ func TestAClientThatGoesAwayBeforeTheUpstreamAnswersRecords499AndLogsNoUpstreamE
 // through shutdown.WithCancel while the client is still there, is answered 503 on a connection
 // that closes, so the client can retry, and nothing is logged as an upstream error (#527). Before
 // #527 it was answered 502 and logged.
+// Lifecycle cell shutdown / awaiting headers (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestARequestWaitingForTheUpstreamWhenTheProxyShutsDownIsAnswered503AndLogsNoUpstreamError(t *testing.T) {
 	arrived, release := make(chan struct{}), make(chan struct{})
 	addr := fakeenvproxy.Start(t, 1, func(net.Conn) { close(arrived); <-release }).Addr
@@ -1147,6 +1157,7 @@ func TestAnUpstreamBodyReadErrorIsLoggedOnlyWhileTheClientIsThere(t *testing.T) 
 // response then never starts; and where the rest comes while the response starts, the transport's
 // next read of the closed body fails and it closes the upstream connection, cutting the stream with
 // "upstream error … use of closed network connection" (the merge-queue flake's line).
+// Lifecycle cell completes / body in flight (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestAStreamTheUpstreamStartsBeforeTheRequestBodyEndsIsRelayedWhole(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

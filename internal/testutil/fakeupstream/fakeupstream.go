@@ -29,6 +29,9 @@ type Server struct {
 	// Handler, if set, answers instead of the echo, after recording. It reads the request as sent:
 	// its body is restored once recorded.
 	Handler http.HandlerFunc
+	// Live, with Handler, hands Handler the request as it arrives, its body unread and nothing
+	// recorded, so it can answer while the request body is still in flight (#672).
+	Live bool
 }
 
 // New starts a fake upstream; close it with t.Cleanup(s.Close).
@@ -39,11 +42,17 @@ func New() *Server {
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	live, h := s.Live, s.Handler
+	s.mu.Unlock()
+	if live && h != nil {
+		h(w, r)
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	s.mu.Lock()
 	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery,
 		Host: r.Host, Header: r.Header.Clone(), Body: body, Trailer: r.Trailer.Clone()})
-	h := s.Handler
 	s.mu.Unlock()
 	if h != nil {
 		r.Body = io.NopCloser(bytes.NewReader(body))

@@ -62,6 +62,7 @@ func serveStalled(t *testing.T, h http.Handler, r *http.Request) *httptest.Respo
 	return w
 }
 
+// Lifecycle cell timeout / awaiting headers (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 	cases := []struct {
 		name, method, reqBody string
@@ -112,6 +113,7 @@ func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 	}
 }
 
+// Lifecycle cell timeout / streaming, which the matrix marks unreachable (TestTheRelayLifecycleMatrix); kept for what it pins beyond the cell.
 func TestHeaderTimeoutDoesNotLimitAStreamedBody(t *testing.T) {
 	// The headers must beat the timeout even on a loaded runner, and the body must come after it.
 	const timeout = time.Second
