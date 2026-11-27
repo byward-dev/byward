@@ -16,6 +16,11 @@ import (
 // never meets it, and it is never a real credential.
 func fakeToken(prefix string) string { return prefix + strings.Repeat("Q7", 18) }
 
+// fakeJWT is a compact JWS built by concatenation, so no whole token sits in the file.
+func fakeJWT() string {
+	return "eyJ" + "hbGciOiJFUzI1NiJ9" + "." + "eyJ" + "zdWIiOiJ4In0" + "." + "sig"
+}
+
 // secretKinds are a value of each kind secretKind names, with the class a refusal says.
 var secretKinds = []struct{ value, class string }{
 	{fakeToken("ghp_"), "a GitHub token"},
@@ -58,6 +63,10 @@ var secretKinds = []struct{ value, class string }{
 	{"100% " + fakeToken("ghp_"), "a GitHub token"},         // a % that is no escape
 	{"ghp_" + strings.Repeat("q7", 18), "a GitHub token"},   // a tail in lower case
 	{"ghp_Q_" + strings.Repeat("Q7", 18), "a GitHub token"}, // an underscore in the tail
+	{fakeJWT(), "a JWT"},
+	{"Bearer " + fakeJWT(), "a JWT"},   // as an Authorization header's value
+	{"x\n" + fakeJWT(), "a JWT"},       // shown quoted, after the escape \n
+	{"Bearer%20" + fakeJWT(), "a JWT"}, // percent-escaped, as a URL's path shows it
 }
 
 // kindRefusal is the refusal of a setting, named as given, whose value looks like class: shown by its
@@ -208,6 +217,21 @@ func TestARealisticValueOfAFreeTextSettingIsNoSecret(t *testing.T) {
 		c := readContextOf(s)
 		if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); err != nil {
 			t.Errorf("%s=%q: %v, want it to load", s.Env(), value, err)
+		}
+	}
+}
+
+// A Bearer or Basic word in free text is no secret: logging.LooksSecret matches it, to hide a value
+// in a log line, but config refuses only what holds a credential's shape, a JWT here (#495). These
+// rows fail if config refuses by LooksSecret instead of logging.HoldsJWT.
+func TestABearerOrBasicWordInFreeTextLoads(t *testing.T) {
+	for _, name := range []string{"resource-name", "operator-name", "scope-description", "oidc-name"} {
+		s := lookup(name)
+		c := readContextOf(s)
+		for _, value := range []string{"Basic read access to your dashboards", "Ann Basic Lee", "Bearer API", "Basic tier", "Read the bearer bonds ledger"} {
+			if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); err != nil {
+				t.Errorf("%s=%q: %v, want it to load", s.Env(), value, err)
+			}
 		}
 	}
 }

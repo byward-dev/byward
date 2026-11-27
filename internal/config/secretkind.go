@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // tokenPrefixes are the token prefixes vendors document, each with the class a refusal names. The
@@ -65,8 +67,13 @@ var keyValuePassword = regexp.MustCompile(`(?i)(?:^|[;\s?&,"])(?:password|pwd)\s
 // passwordKind is the kind a refusal names for a connection string with a password.
 const passwordKind = "a connection string with a password"
 
+// jwtKind is the kind a refusal names for a compact JWS or JWE (logging.HoldsJWT). A Bearer or
+// Basic credential is no kind here: logging.LooksSecret matches everyday wording such as
+// "Basic tier", so it only decides how a value is shown, never whether it is accepted.
+const jwtKind = "a JWT"
+
 // secretKind names the kind of secret s holds, or is "" when it holds none: a token by a vendor's
-// documented prefix, or a connection string with a password.
+// documented prefix, a connection string with a password, or a JWT.
 func secretKind(s string) string {
 	for _, p := range tokenPatterns {
 		if p.re.MatchString(s) {
@@ -75,6 +82,9 @@ func secretKind(s string) string {
 	}
 	if urlPassword.MatchString(s) || keyValuePassword.MatchString(s) {
 		return passwordKind
+	}
+	if logging.HoldsJWT(s) {
+		return jwtKind
 	}
 	return ""
 }

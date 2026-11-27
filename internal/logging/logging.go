@@ -178,8 +178,14 @@ var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 // over-matches by design (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides
 // more, but refuses nothing.
 func LooksSecret(s string) bool {
-	return authScheme.MatchString(s) || jwtShape.MatchString(s)
+	return authScheme.MatchString(s) || HoldsJWT(s)
 }
+
+// HoldsJWT reports whether s holds a compact JWS or JWE (jwtShape). It is the part of LooksSecret
+// that a check may refuse by: prose matches it only as a word starting eyJ before a dot, such as
+// eyJohn.Smith, where Bearer and Basic match everyday wording ("Basic tier"). Config refuses a JWT
+// in a setting that is not secret by it (#495).
+func HoldsJWT(s string) bool { return jwtShape.MatchString(s) }
 
 type ctxKey struct{}
 
