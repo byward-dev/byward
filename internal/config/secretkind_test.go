@@ -221,17 +221,24 @@ func TestARealisticValueOfAFreeTextSettingIsNoSecret(t *testing.T) {
 	}
 }
 
-// A Bearer or Basic word in free text is no secret: logging.LooksSecret matches it, to hide a value
-// in a log line, but config refuses only what holds a credential's shape, a JWT here (#495). These
-// rows fail if config refuses by LooksSecret instead of logging.HoldsJWT.
+// A Bearer or Basic word, or an eyJ inside a word, in free text is no secret: logging.LooksSecret
+// matches both, to hide a value in a log line, but config refuses only what holds a JWT whose header
+// starts a word (logging.HoldsJWT, #495). These rows fail if config refuses by LooksSecret instead.
 func TestABearerOrBasicWordInFreeTextLoads(t *testing.T) {
 	for _, name := range []string{"resource-name", "operator-name", "scope-description", "oidc-name"} {
 		s := lookup(name)
 		c := readContextOf(s)
-		for _, value := range []string{"Basic read access to your dashboards", "Ann Basic Lee", "Bearer API", "Basic tier", "Read the bearer bonds ledger"} {
+		for _, value := range []string{"Basic read access to your dashboards", "Ann Basic Lee", "Bearer API", "Basic tier", "Read the bearer bonds ledger", "HoneyJar.example"} {
 			if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); err != nil {
 				t.Errorf("%s=%q: %v, want it to load", s.Env(), value, err)
 			}
+		}
+	}
+	for name, value := range map[string]string{"allowed-hosts": "heyJude.example", "allowed-origins": "https://heyJude.example"} {
+		s := lookup(name)
+		c := readContextOf(s)
+		if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); err != nil {
+			t.Errorf("%s=%q: %v, want it to load", s.Env(), value, err)
 		}
 	}
 }

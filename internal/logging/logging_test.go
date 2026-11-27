@@ -355,3 +355,33 @@ func TestRequestIDsAreDistinctVersion4UUIDs(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// HoldsJWT is the JWT shape a value may be refused by: a JWT whose header starts a word, or whose
+// payload follows a dot. It finds what LooksSecret's JWT rule finds, except an eyJ header inside a
+// word, which only the redactor hides (#495).
+func TestHoldsJWTFindsAJWTButNotAnEyJInsideAWord(t *testing.T) {
+	for _, tc := range []struct {
+		s           string
+		holds, hide bool
+	}{
+		{token, true, true},
+		{"Bearer " + token, true, true},
+		{"--token=" + token, true, true},
+		{"x" + "." + "eyJ" + "zdWIiOiJ4In0" + ".sig", true, true}, // a header that does not start eyJ
+		{"heyJude.example", false, true},
+		{"HoneyJar.example", false, true},
+		{"app2eyJet.example", false, true},                      // a digit before eyJ is inside the word
+		{"OKeyJar.example", false, true},                        // so is an upper-case letter
+		{"ann.eyJones", false, true},                            // a dot before eyJ, but no dot after it
+		{"eyJ" + "hbGciOiJFUzI1NiJ9" + "." + "eyJ", true, true}, // cut short after the header's dot
+		{"Basic tier", false, true},
+		{"dcr-Qm9eyJx_7k-eyJAbCdEfGh", false, false},
+	} {
+		if got := HoldsJWT(tc.s); got != tc.holds {
+			t.Errorf("HoldsJWT(%q) = %v, want %v", tc.s, got, tc.holds)
+		}
+		if got := LooksSecret(tc.s); got != tc.hide {
+			t.Errorf("LooksSecret(%q) = %v, want %v", tc.s, got, tc.hide)
+		}
+	}
+}
