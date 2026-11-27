@@ -51,8 +51,12 @@ var tokenPatterns = func() []struct {
 
 // urlPassword is a URL with a password in its user part, such as postgres://user:pass@host/db. An
 // empty password (user:@host) is none. A comma is a user part's character (RFC 3986's sub-delims);
-// a list's entries never hold one, and are each read on their own (ShownListSecretKind).
-var urlPassword = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*:[^/@\s]+@`)
+// a list's entries never hold one, and are each read on their own (ShownListSecretKind). A " is
+// none (RFC 3986 §3.2.1: userinfo is unreserved, pct-encoded, sub-delims and ":"), so the user name
+// stops at one, and a JSON log line naming an origin and, later, an email is no URL with a password
+// ({"url":"https://api.example","user":"bob@example.com"}); the password is still read past a ", so
+// one a reader would mistake for a quote is still found (#657).
+var urlPassword = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^/@\s"]*:[^/@\s]+@`)
 
 // keyValuePassword is a password given by its key, as connection strings do: Server=db;Password=x,
 // libpq's host=db password=x, or a URL query's ?password=x. A " counts as a start too, as a value

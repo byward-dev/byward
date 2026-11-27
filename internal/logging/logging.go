@@ -185,13 +185,14 @@ var jwtWord = regexp.MustCompile(`(?:^|[^A-Za-z0-9])` + jwtHeader)
 // is accepted, because a length floor would let a short credential such as Basic YTpi through.
 var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 
-// LooksSecret reports whether s holds something shaped like a credential: a compact JWS or JWE, or an
-// HTTP Bearer or Basic credential. Logs redact such a value, and revoke-user prints such a user key
-// only by its length (#594). It decides how a value is shown, never whether it is accepted: it
-// over-matches by design (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides
-// more, but refuses nothing.
+// LooksSecret reports whether s holds something shaped like a credential: a compact JWS or JWE, an
+// HTTP Bearer or Basic credential, or any kind the catalogue refuses (ShownSecretKind: a vendor
+// token, a connection string with a password), so what config would refuse is hidden in a log line
+// too (#657). Logs redact such a value, and revoke-user prints such a user key only by its length
+// (#594). It decides how a value is shown, never whether it is accepted: it over-matches by design
+// (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides more, but refuses nothing.
 func LooksSecret(s string) bool {
-	return authScheme.MatchString(s) || jwtShape.MatchString(s)
+	return authScheme.MatchString(s) || jwtShape.MatchString(s) || ShownSecretKind(s) != ""
 }
 
 // HoldsJWT reports whether s holds a compact JWS or JWE: a segment starting eyJ at the start of a

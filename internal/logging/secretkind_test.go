@@ -119,10 +119,21 @@ func TestSecretKindReadsEveryURLSchemeAndUserPart(t *testing.T) {
 		"x+1://app:" + pw + "@h.example",     // each of RFC 3986's scheme characters
 		"x.1://app:" + pw + "@h.example",
 		"x-1://app:" + pw + "@h.example",
-		"redis://:" + pw + "@cache.example", // an empty user name
+		"redis://:" + pw + "@cache.example",                 // an empty user name
+		"postgres://app:" + "p\"w" + pw + "@db.example/app", // a " in the password
 	} {
 		if got := secretKind(s); got != passwordKind {
 			t.Errorf("secretKind(%q) = %q, want %q", s, got, passwordKind)
+		}
+	}
+	for _, s := range []string{
+		`{"level":"info","endpoint":"https://api.example.com","user":"bob@example.com"}`, // a " ends the user name
+		`{"iss":"https://login.example","email":"a@b.example"}`,
+		`{"level":"info","endpoint":"https://api.example.com/v1","user":"bob@example.com"}`, // a path before the @
+		"url=https://api.example.com user=bob@example.com",                                  // a space before the @
+	} {
+		if got := secretKind(s); got != "" {
+			t.Errorf("secretKind(%q) = %q, want none", s, got)
 		}
 	}
 }
@@ -193,6 +204,16 @@ func TestShownSecretKindReadsAValueAsItIsShown(t *testing.T) {
 	} {
 		if got := ShownSecretKind(tc.shown); got != tc.want {
 			t.Errorf("%s: ShownSecretKind = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// What the catalogue refuses, logs hide: every value of every kind, plain and as a reader would see
+// it, is one LooksSecret redacts, so a value config refuses never reaches a log line whole (#657).
+func TestEveryKindTheCatalogueRefusesIsRedacted(t *testing.T) {
+	for i, k := range secretKinds {
+		if !LooksSecret(k.value) || !LooksSecret(strconv.Quote(k.value)) {
+			t.Errorf("secretKinds[%d] (%s) is refused but not redacted, plain or quoted", i, k.class)
 		}
 	}
 }
