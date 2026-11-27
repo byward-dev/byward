@@ -539,6 +539,7 @@ func TestDeleteStopsTheUpstreamProcessAndEndsTheMCPSession(t *testing.T) {
 	}
 }
 
+// Lifecycle cells legacy request, upstream gone / streaming and not started (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestCrashFailsInFlightRequestsAndLaterOnesGet404(t *testing.T) {
 	b := newBridge(t, nil)
 	s := b.initialize(t, "alice")
@@ -735,6 +736,7 @@ func TestUserAtTheirCapWithEveryProcessInUseGets503WhileOthersStillStart(t *test
 	}
 }
 
+// Lifecycle cells legacy initialize, upstream gone / not started and awaiting headers (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestInitializeThatCannotStartOrReachTheUpstreamProcessIs502WithoutAnMCPSession(t *testing.T) {
 	for name, tc := range map[string]struct {
 		command []string // nil: the fake upstream in its JSON-RPC mode
@@ -809,6 +811,7 @@ func TestARequestOnAnMCPSessionWhoseUpstreamProcessCanNoLongerTakeMessagesIs404A
 // for a failed initialize: Send arms the stop for a process whose reader is gone, and its exit
 // cancels it (#571). The initialize is larger than any pipe holds, and the -readn process reads
 // nothing until a SIGUSR2 closes its stdin, so the write fails, part-way in practice.
+// Lifecycle cells legacy initialize, upstream gone / body in flight (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestUpstreamProcessCrashingAsItsInitializeIsSentIsLoggedAsACrash(t *testing.T) {
 	b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-readn=1"} })
 	answered := make(chan *httptest.ResponseRecorder, 1)
@@ -868,6 +871,7 @@ func TestAnInitializeWhoseRequestPassedItsDeadlineBeforeItIsSentStopsItsProcessA
 	}
 }
 
+// Lifecycle cells legacy GET, upstream gone / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestOpenGETStreamEndsWhenTheUpstreamProcessExits(t *testing.T) {
 	b := newBridge(t, nil)
 	s := b.initialize(t, "alice")
@@ -1113,6 +1117,7 @@ func TestRejectedProtocolVersionLeavesTheProcessIdle(t *testing.T) {
 	}
 }
 
+// Lifecycle cells legacy GET, timeout / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAQuietGETStreamsProcessIsEvictedForANewSessionAndItsSessionThenGets404(t *testing.T) {
 	b := newBridge(t, func(c *Config) {
 		c.MaxPerUser = 1

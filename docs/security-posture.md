@@ -306,6 +306,8 @@ returns to a denied host: every sign-in stage refuses it, whichever of its redir
 | Token lifetimes are fixed | Access token 1 h, refresh token 30 days absolute and 14 days idle, codes 60 s: constants, with no setting, although ADR-0006 §5 allows configuring them within bounds. | ADR-0006 §5; `internal/broker/broker.go` |
 | Failed client authentication is not throttled per client | The `/token` limit is per address only; a client secret or client assertion guessed from many addresses is limited by the address budgets alone. | [Rate limits](reference/rate-limits.md) |
 | stdio upstream processes share byward's uid | One user's process can read another user's files and environment, and on a `ptrace_scope` 0 host their memory. byward offers no per-user uid or sandbox for them; the operator isolates by host settings and separate containers or VMs. | #182 |
+| Nothing bounds how long a stdio upstream takes to answer | A request to a stdio process waits for its answer for as long as the process holds it, in either protocol era; what ends the wait today is the MCP client leaving or the proxy shutting down. The relay has a header timeout; the stdio bridge has none. | No issue (`internal/upstream/stdio`; #672 lifecycle matrix) |
+| A legacy request whose MCP client left logs its late answer at WARN | The upstream is not told of the cancellation in the legacy era, so its answer arrives with no request waiting, and is logged "upstream response for no waiting request". It is noise, not a failure. | No issue (`internal/upstream/stdio/bridge.go`; #672 lifecycle matrix) |
 
 ## Dependencies and supply chain
 

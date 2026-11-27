@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 )
 
 // evictions records the users, reasons and open streams Manager.Evicted was told about.
@@ -544,8 +546,8 @@ func TestARequestThatHasEndedEvictsNoProcessAtTheUpstreamCapAndIsAnsweredByHowIt
 		{"a request", modernBody(`1`, "echo", "", "")},
 		{"a subscriptions/listen", modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)},
 	} {
-		for _, e := range endings {
-			t.Run(req.name+", "+e.name, func(t *testing.T) {
+		for _, e := range lifecycle.ContextEndings {
+			t.Run(req.name+", "+e.Ending.String(), func(t *testing.T) {
 				b := newModernBridge(t, capped(1, 1, nil))
 				// bobs is the one process, bob's: an evicted one has left procs already, under this lock.
 				bobs := func() *Process {
@@ -565,9 +567,9 @@ func TestARequestThatHasEndedEvictsNoProcessAtTheUpstreamCapAndIsAnsweredByHowIt
 				}
 				readEvents(t, b.modern(t, "bob", modernBody(`1`, "echo", "", ""))) // bob's process, now idle, fills the cap
 				kept := bobs()
-				ctx, end := e.start()
+				ctx, end := e.Start(context.Background())
 				end()
-				e.answered(t, b.serve(ctx, http.MethodPost, "alice", "", req.body, modernHeaders(req.body)...))
+				e.Answered(t, b.serve(ctx, http.MethodPost, "alice", "", req.body, modernHeaders(req.body)...))
 				b.noFailureLogged(t)
 				readEvents(t, b.modern(t, "bob", modernBody(`2`, "echo", "", ""))) // an evicted or stopping process would be replaced
 				if bobs() != kept {

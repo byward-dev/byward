@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 )
 
 // listenBody is a modern subscriptions/listen under the client id "L".
@@ -79,6 +80,7 @@ func observeStream(t *testing.T, modern, acked bool, open func(*bridgeHarness) *
 // recorded with why (#533): client_closed when its MCP client went away, shutdown when the proxy
 // shut down. A listen the shutdown ends with its completion result has completed, so it is not cut
 // off.
+// Lifecycle cells legacy request and GET, client gone and shutdown / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAStdioStreamEndedByItsRequestIsRecordedAsCutOffUnlessItCompleted(t *testing.T) {
 	for _, stream := range []struct {
 		name string
@@ -104,14 +106,14 @@ func TestAStdioStreamEndedByItsRequestIsRecordedAsCutOffUnlessItCompleted(t *tes
 			return b.modernRequest(ctx, listenBody)
 		}, true, true, true},
 	} {
-		for _, e := range endings {
-			t.Run(stream.name+", "+e.name, func(t *testing.T) {
-				ctx, end := e.start()
+		for _, e := range lifecycle.ContextEndings {
+			t.Run(stream.name+", "+e.Ending.String(), func(t *testing.T) {
+				ctx, end := e.Start(context.Background())
 				defer end()
 				_, w, cut := observeStream(t, stream.modern, stream.acked, func(b *bridgeHarness) *http.Request { return stream.open(t, b, ctx) })
 				end()
-				want, written := e.cut, ""
-				if e.shutdown && stream.completes {
+				want, written := e.Cut, ""
+				if (e.Ending == lifecycle.Shutdown) && stream.completes {
 					want, written = "", completeResult
 				}
 				if got := cut(); got != want {
@@ -128,6 +130,7 @@ func TestAStdioStreamEndedByItsRequestIsRecordedAsCutOffUnlessItCompleted(t *tes
 // A stream whose write to its MCP client fails, at a write or at a flush, its request still live,
 // has lost its client: it is recorded as cut off with client_closed, whatever the write was and
 // wherever it was written from (#533). That includes a listen's completion result.
+// Lifecycle cells legacy request, client gone / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAStdioStreamWhoseWriteFailsIsRecordedAsClientClosed(t *testing.T) {
 	const announce, release = `{"jsonrpc":"2.0","id":9,"method":"announce"}`, `{"jsonrpc":"2.0","id":3,"method":"release"}`
 	// An ender ends an open stream; breakIn makes its writer fail.
@@ -214,18 +217,19 @@ func TestAStdioStreamWhoseWriteFailsIsRecordedAsClientClosed(t *testing.T) {
 // An initialize whose stream has started, with a notification the upstream sent before it holds its
 // answer, and whose request then ends, is cut off and logs no initialize failure: it ended because
 // its request did (#533, #549).
+// Lifecycle cells legacy initialize, client gone and shutdown / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAnInitializeEndedByItsRequestAfterItsStreamStartedIsCutOffAndLogsNoInitializeFailure(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			b := newBridge(t, func(c *Config) { c.Command = append(c.Command, "-init=lognhold") })
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			defer end()
 			w := &brokenWriter{header: http.Header{}}
 			cut := b.observed(t, w, b.request(ctx, http.MethodPost, "alice", "", initialize))
 			eventually(t, "the notification", func() bool { return strings.Contains(w.written(), `"method":"notifications/message"`) })
 			end()
-			if got := cut(); got != e.cut {
-				t.Errorf("recorded as cut off %q; want %q", got, e.cut)
+			if got := cut(); got != e.Cut {
+				t.Errorf("recorded as cut off %q; want %q", got, e.Cut)
 			}
 			b.noFailureLogged(t)
 		})
@@ -234,11 +238,12 @@ func TestAnInitializeEndedByItsRequestAfterItsStreamStartedIsCutOffAndLogsNoInit
 
 // An initialize whose request ends before its stream starts is answered by how it ended (#529) and
 // is not cut off: nothing of a stream was sent (#533).
+// Lifecycle cells legacy initialize, client gone and shutdown / awaiting headers (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAnInitializeEndedByItsRequestBeforeItsStreamStartedIsAnsweredAndNotCutOff(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-init=hold"} })
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			defer end()
 			w := httptest.NewRecorder()
 			cut := b.observed(t, w, b.request(ctx, http.MethodPost, "alice", "", initialize))
@@ -247,7 +252,7 @@ func TestAnInitializeEndedByItsRequestBeforeItsStreamStartedIsAnsweredAndNotCutO
 			if got := cut(); got != "" {
 				t.Errorf("recorded as cut off %q; want none", got)
 			}
-			e.answered(t, w)
+			e.Answered(t, w)
 		})
 	}
 }
@@ -256,6 +261,7 @@ func TestAnInitializeEndedByItsRequestBeforeItsStreamStartedIsAnsweredAndNotCutO
 // with its answer, with the error its process's exit or its session's end gets, with the completion
 // result of a listen the proxy ends, by the upstream ending a subscription, or as a GET stream
 // another replaces (#533).
+// Lifecycle cells legacy GET, completes / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAStdioStreamThatEndsWithoutItsRequestEndingOrAWriteFailingIsNotCutOff(t *testing.T) {
 	const exited = "upstream process exited"
 	// A finisher ends an open stream; nil for one that ends by itself.

@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 )
 
 // modernBody is a 2026-07-28 request: id and method, extra _meta fields (JSON, may be empty), and
@@ -355,14 +357,14 @@ func closeStdin(t *testing.T, b *bridgeHarness) {
 // no failure: the process's own failure is not why the request ended (#568). No verdict is cached,
 // so the next user's process is probed and served.
 func TestAnEndedRequestWhoseProbeCannotBeWrittenIsAnsweredByHowItEnded(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			b := newModernBridge(t, nil)
 			closeStdin(t, b)
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			end()
 			body := modernBody(`1`, "echo", "", "")
-			e.answered(t, b.serve(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...))
+			e.Answered(t, b.serve(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...))
 			b.noFailureLogged(t)
 			res := b.modern(t, "bob", body)
 			_, _ = io.Copy(io.Discard, res.Body)
@@ -381,11 +383,11 @@ func TestAnEndedRequestWhoseProbeCannotBeWrittenIsAnsweredByHowItEnded(t *testin
 // upstream as legacy for every user and stopped the process as not_modern. The fake holds its
 // answer until the test has ended the request.
 func TestARequestThatEndsDuringTheProbeDecidesNothing(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-holddiscover", "-modern"} })
 			b.bridge.probeTimeout = time.Minute // longer than guard: no stall reads as the probe's timeout
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			body := modernBody(`1`, "echo", "", "")
 			answered := make(chan *httptest.ResponseRecorder, 1)
 			go func() { answered <- b.serve(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...) }()
@@ -398,7 +400,7 @@ func TestARequestThatEndsDuringTheProbeDecidesNothing(t *testing.T) {
 			release()
 			select {
 			case w := <-answered:
-				e.answered(t, w)
+				e.Answered(t, w)
 			case <-time.After(guard):
 				t.Fatal("alice's request was never answered")
 			}

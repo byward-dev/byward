@@ -33,6 +33,9 @@ func TestAMatrixFailsEachCellItDoesNotClassify(t *testing.T) {
 		"known residual without why": {func(m map[Cell]Case) {
 			m[Cell{Ending: ClientGone, State: BodyInFlight}] = KnownResidual("#1", "", func(*testing.T) {})
 		}, "cell client gone/body in flight: an Unreachable"},
+		"known residual without an issue": {func(m map[Cell]Case) {
+			m[Cell{Ending: Timeout, State: Streaming}] = KnownResidual("", "why", func(*testing.T) {})
+		}, "cell timeout/streaming: a KnownResidual cell names the issue"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := full()
@@ -44,7 +47,8 @@ func TestAMatrixFailsEachCellItDoesNotClassify(t *testing.T) {
 	}
 }
 
-// Every ending and state has a name, so a new one added to the enumerations names its cells.
+// Every ending and state has a name, so a new one added to the enumerations names its cells, and
+// Endings and States list every one.
 func TestEveryEndingAndStateHasAName(t *testing.T) {
 	var names []string
 	for _, e := range Endings {
@@ -52,6 +56,9 @@ func TestEveryEndingAndStateHasAName(t *testing.T) {
 	}
 	for _, s := range States {
 		names = append(names, s.String())
+	}
+	if want := append(endingNames[:], stateNames[:]...); !slices.Equal(names, want) {
+		t.Errorf("names %q; want %q", names, want)
 	}
 	if slices.Contains(names, "") || len(slices.Compact(slices.Sorted(slices.Values(names)))) != len(names) {
 		t.Errorf("names %q: want each one, distinct", names)
@@ -64,9 +71,13 @@ func TestRunRunsEveryCellThatHasARun(t *testing.T) {
 	ran := map[Cell]int{}
 	pinned, residual := Cell{Ending: Completes, State: Streaming}, Cell{Ending: Shutdown, State: After1xx}
 	m[pinned] = Pinned(func(*testing.T) { ran[pinned]++ })
-	m[residual] = KnownResidual("#1", "why", func(*testing.T) { ran[residual]++ })
+	var residualName string
+	m[residual] = KnownResidual("#1", "why", func(t *testing.T) { ran[residual]++; residualName = t.Name() })
 	Run(t, m)
 	if len(ran) != 2 || ran[pinned] != 1 || ran[residual] != 1 {
 		t.Errorf("ran %v; want the pinned and the residual cell once each", ran)
+	}
+	if !strings.HasSuffix(residualName, "/shutdown/after_1xx_(known_residual_#1)") {
+		t.Errorf("the residual cell ran as %q; want it named by its cell and its issue", residualName)
 	}
 }

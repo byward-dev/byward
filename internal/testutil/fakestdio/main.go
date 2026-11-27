@@ -15,11 +15,11 @@
 // Flag -modern makes it a 2026-07-28 server (see serveModern). Flag -mcp makes it a 2025-11-25
 // JSON-RPC server instead (see serveMCP); with -stubborn as well, it then
 // keeps running after stdin closes, ignoring SIGTERM. Flag -init=error, -init=exit or -init=hold
-// makes initialize fail with a JSON-RPC error, exit the process, or never be answered (writing
+// makes initialize fail with a JSON-RPC error, exit the process, or be answered only on SIGUSR1 (writing
 // "holding initialize" to stderr once it has read it); -init=block writes "blocking" to stderr and
 // never reads stdin at all; a "hold" request writes "holding" to stderr once it is held;
 // -init=lognerror sends a notifications/message first, then the error; -init=lognhold sends the
-// notification and never answers. Flag -silentdiscover makes serveMCP never answer server/discover,
+// notification and answers only on SIGUSR1. Flag -silentdiscover makes serveMCP never answer server/discover,
 // and -invaliddiscover answer it with -32602;
 // flag -exitondiscover, given before -modern, makes serveModern exit with status 3 on reading it,
 // and -holddiscover, also before -modern, answer it only on SIGUSR1 (writing "holding discover" to
@@ -312,6 +312,19 @@ func serveMCP() {
 		b, _ := json.Marshal(v)
 		write(message{ID: id, Result: b})
 	}
+	initResult := func(id json.RawMessage) {
+		res := map[string]any{"protocolVersion": version, "capabilities": map[string]any{},
+			"serverInfo": map[string]any{"name": "fakestdio", "version": "0"}}
+		if version == "none" {
+			delete(res, "protocolVersion")
+		}
+		result(id, res)
+	}
+	var answerInit chan os.Signal // -init=hold and -init=lognhold answer the held initialize on SIGUSR1
+	if initMode == "hold" || initMode == "lognhold" {
+		answerInit = make(chan os.Signal, 1)
+		signal.Notify(answerInit, syscall.SIGUSR1)
+	}
 	var held []json.RawMessage
 	asks := map[string]json.RawMessage{} // our request id -> the client request waiting on it
 	n := 0
@@ -356,21 +369,18 @@ func serveMCP() {
 				os.Exit(4)
 			case "hold":
 				fmt.Fprintln(os.Stderr, "holding initialize")
+				go func(id json.RawMessage) { <-answerInit; initResult(id) }(m.ID)
 				continue
 			case "lognhold":
 				write(message{Method: "notifications/message", Params: json.RawMessage(`{"level":"info"}`)})
+				go func(id json.RawMessage) { <-answerInit; initResult(id) }(m.ID)
 				continue
 			case "lognerror":
 				write(message{Method: "notifications/message", Params: json.RawMessage(`{"level":"info"}`)})
 				write(message{ID: m.ID, Error: json.RawMessage(`{"code":-32602,"message":"Unsupported protocol version"}`)})
 				continue
 			}
-			res := map[string]any{"protocolVersion": version, "capabilities": map[string]any{},
-				"serverInfo": map[string]any{"name": "fakestdio", "version": "0"}}
-			if version == "none" {
-				delete(res, "protocolVersion")
-			}
-			result(m.ID, res)
+			initResult(m.ID)
 		case "echo":
 			write(message{ID: m.ID, Result: m.Params})
 		case "token": // the token socket's answer, as the result

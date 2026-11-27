@@ -25,7 +25,9 @@ const (
 // Endings are every Ending, in order.
 var Endings = upTo(endings)
 
-var endingNames = [endings]string{"completes", "client gone", "upstream gone", "timeout", "shutdown"}
+var endingNames = [endings]string{
+	Completes: "completes", ClientGone: "client gone", UpstreamGone: "upstream gone", Timeout: "timeout", Shutdown: "shutdown",
+}
 
 func (e Ending) String() string { return endingNames[e] }
 
@@ -46,7 +48,10 @@ const (
 // States are every State, in order.
 var States = upTo(states)
 
-var stateNames = [states]string{"not started", "body in flight", "awaiting headers", "after 1xx", "streaming", "trailer pending", "upgrade requested"}
+var stateNames = [states]string{
+	NotStarted: "not started", BodyInFlight: "body in flight", AwaitingHeaders: "awaiting headers", After1xx: "after 1xx",
+	Streaming: "streaming", TrailerPending: "trailer pending", UpgradeRequested: "upgrade requested",
+}
 
 func (s State) String() string { return stateNames[s] }
 
@@ -114,8 +119,8 @@ func Run(t *testing.T, m map[Cell]Case) {
 	}
 }
 
-// problems are the cells m leaves out, and those it marks Unreachable, NotRun or KnownResidual
-// without saying why.
+// problems are the cells m leaves out, those it marks Unreachable, NotRun or KnownResidual without
+// saying why, and the KnownResidual cells that name no issue.
 func problems(m map[Cell]Case) []string {
 	var out []string
 	for _, e := range Endings {
@@ -126,6 +131,8 @@ func problems(m map[Cell]Case) []string {
 				out = append(out, fmt.Sprintf("cell %s is not classified: pin it, or mark it Unreachable, NotRun or KnownResidual with why", c))
 			case (k.run == nil || k.residual) && k.why == "":
 				out = append(out, fmt.Sprintf("cell %s: an Unreachable, NotRun or KnownResidual cell says why", c))
+			case k.residual && k.issue == "":
+				out = append(out, fmt.Sprintf("cell %s: a KnownResidual cell names the issue that fixes it", c))
 			}
 		}
 	}

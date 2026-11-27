@@ -16,41 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byward-dev/byward/internal/logging"
-	"github.com/byward-dev/byward/internal/shutdown"
+	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 )
-
-// ending is one way a request can end before it is answered: its MCP client went away, or the proxy
-// is shutting down (the server ends each request in flight through shutdown.WithCancel). The first
-// records 499, never sent; the second answers 503 on a connection that closes, so the MCP client,
-// still there, can retry (#527, #529).
-type ending struct {
-	name     string
-	start    func() (ctx context.Context, end func())
-	status   int
-	body     string
-	shutdown bool // the proxy ended the request: its connection closes, a listen gets its completion
-	// cut is what a stream already started records when the request ends this way (#533).
-	cut logging.CutOff
-}
-
-var endings = []ending{
-	{"the MCP client went away", func() (context.Context, func()) {
-		ctx, cancel := context.WithCancel(context.Background())
-		return ctx, cancel
-	}, 499, "", false, logging.ClientClosed},
-	{"the proxy shuts down", func() (context.Context, func()) {
-		return shutdown.WithCancel(context.Background())
-	}, http.StatusServiceUnavailable, "the proxy is shutting down\n", true, logging.ShutDown},
-}
-
-// answered fails t unless w is the answer to a request that ended this way.
-func (e ending) answered(t *testing.T, w *httptest.ResponseRecorder) {
-	t.Helper()
-	if w.Code != e.status || w.Body.String() != e.body || (w.Header().Get("Connection") == "close") != e.shutdown {
-		t.Fatalf("answer %d %q, Connection %q; want %d %q, closing %v", w.Code, w.Body, w.Header().Get("Connection"), e.status, e.body, e.shutdown)
-	}
-}
 
 // noFailureLogged fails t if the bridge or its processes logged anything at WARN or above.
 func (b *bridgeHarness) noFailureLogged(t *testing.T) {
@@ -69,6 +36,7 @@ const modernNotification = `{"jsonrpc":"2.0","method":"notifications/progress","
 // On main the bridge logged "relaying to the upstream process failed" or "cannot start the upstream
 // process" with context canceled, and answered 502. A running process is leased even to a request
 // that has ended, so each row reaches the path its name says, every run.
+// Lifecycle cells legacy initialize, request and GET, client gone and shutdown / not started (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestARequestThatEndsBeforeTheUpstreamProcessAnswersIsAnsweredByHowItEndedAndNeverLoggedAsAFailure(t *testing.T) {
 	for _, path := range []struct {
 		name string
@@ -115,12 +83,12 @@ func TestARequestThatEndsBeforeTheUpstreamProcessAnswersIsAnsweredByHowItEndedAn
 			return b, b.serve(ctx, http.MethodPost, "alice", "", modernNotification, modernHeaders(modernNotification)...)
 		}},
 	} {
-		for _, e := range endings {
-			t.Run(path.name+", "+e.name, func(t *testing.T) {
-				ctx, end := e.start()
+		for _, e := range lifecycle.ContextEndings {
+			t.Run(path.name+", "+e.Ending.String(), func(t *testing.T) {
+				ctx, end := e.Start(context.Background())
 				end()
 				b, w := path.send(t, ctx)
-				e.answered(t, w)
+				e.Answered(t, w)
 				b.noFailureLogged(t)
 			})
 		}
@@ -131,6 +99,7 @@ func TestARequestThatEndsBeforeTheUpstreamProcessAnswersIsAnsweredByHowItEndedAn
 // not reading it, records how it ended instead of the 200 or 502 it got on main, and logs no failure
 // (#529; main logged "initialize failed: no MCP session"). Its process is stopped, as for any
 // initialize that does not succeed.
+// Lifecycle cells legacy initialize, client gone and shutdown / awaiting headers and body in flight (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAnInitializeThatEndsBeforeItIsAnsweredIsAnsweredByHowItEndedAndItsProcessStopped(t *testing.T) {
 	for _, s := range []struct {
 		name, init, body, said string
@@ -139,15 +108,15 @@ func TestAnInitializeThatEndsBeforeItIsAnsweredIsAnsweredByHowItEndedAndItsProce
 		// Larger than any pipe buffer, so the Send waits on a process that never reads.
 		{"while it is being sent", "-init=block", strings.Replace(initialize, `"params":{`, `"params":{"pad":"`+strings.Repeat("a", 4<<20)+`",`, 1), "blocking"},
 	} {
-		for _, e := range endings {
-			t.Run(s.name+", "+e.name, func(t *testing.T) {
+		for _, e := range lifecycle.ContextEndings {
+			t.Run(s.name+", "+e.Ending.String(), func(t *testing.T) {
 				b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", s.init} })
-				ctx, end := e.start()
+				ctx, end := e.Start(context.Background())
 				answered := make(chan *httptest.ResponseRecorder, 1)
 				go func() { answered <- b.serve(ctx, http.MethodPost, "alice", "", s.body) }()
 				b.saidOnStderr(t, s.said)
 				end()
-				e.answered(t, <-answered)
+				e.Answered(t, <-answered)
 				eventually(t, "the unusable process to be stopped", func() bool { return len(b.log.with("stopping upstream process")) == 1 })
 				b.noFailureLogged(t)
 			})
@@ -174,12 +143,13 @@ func TestAnInitializeWhoseAnswerCannotBeWrittenWhileItsRequestIsLiveIsLoggedAsAF
 
 // A stream that has started keeps the status it sent when its request ends: nothing more is written
 // to it, not even when the proxy shuts down.
+// Lifecycle cells legacy request, client gone and shutdown / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAStartedStreamKeepsItsStatusAndGetsNothingMoreWhenItsRequestEnds(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			b := newBridge(t, nil)
 			sid := b.initialize(t, "alice")
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			answered := make(chan *httptest.ResponseRecorder, 1)
 			go func() {
 				answered <- b.serve(ctx, http.MethodPost, "alice", sid, `{"jsonrpc":"2.0","id":2,"method":"hold"}`)
@@ -197,15 +167,16 @@ func TestAStartedStreamKeepsItsStatusAndGetsNothingMoreWhenItsRequestEnds(t *tes
 
 // A GET whose request ended never takes over its MCP session's live GET stream: the next message
 // outside a request still reaches the live one.
+// Lifecycle cells legacy GET, client gone and shutdown / not started (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAnEndedGETNeverReplacesItsMCPSessionsLiveGETStream(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			b := newBridge(t, nil)
 			sid := b.initialize(t, "alice")
 			live := b.listen(t, context.Background(), sid)
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			end()
-			e.answered(t, b.serve(ctx, http.MethodGet, "alice", sid, ""))
+			e.Answered(t, b.serve(ctx, http.MethodGet, "alice", sid, ""))
 			readEvents(t, b.post(t, "alice", sid, `{"jsonrpc":"2.0","id":1,"method":"announce"}`))
 			if got, ok := live.next(); !ok || got != `{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info"}}` {
 				t.Fatalf("the live GET stream got %q (open %v); want the announcement", got, ok)
@@ -219,10 +190,10 @@ func TestAnEndedGETNeverReplacesItsMCPSessionsLiveGETStream(t *testing.T) {
 // upstream. A listen whose MCP client went away gets no completion, only the upstream cancellation
 // (#529).
 func TestAListenEndedByTheProxyShuttingDownGetsItsCompletionAndOneWhoseMCPClientWentAwayDoesNot(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			b := newModernBridge(t, nil)
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			body := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
 			w := &brokenWriter{header: http.Header{}} // read while it is written
 			done := make(chan struct{})
@@ -235,12 +206,12 @@ func TestAListenEndedByTheProxyShuttingDownGetsItsCompletionAndOneWhoseMCPClient
 			<-done
 			got := eventsOf(t, &http.Response{Header: w.header, Body: io.NopCloser(strings.NewReader(w.written()))}).all()
 			want := 1
-			if e.shutdown {
+			if e.Ending == lifecycle.Shutdown {
 				want = 2
 			}
 			if len(got) != want || !strings.Contains(got[0], "notifications/subscriptions/acknowledged") ||
-				(e.shutdown && !sameJSON(t, []byte(got[1]), `{"jsonrpc":"2.0","id":"L","result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"L"}}}`)) {
-				t.Fatalf("listen events %q; want its acknowledgement, then its completion only if the proxy ended it (%v)", got, e.shutdown)
+				((e.Ending == lifecycle.Shutdown) && !sameJSON(t, []byte(got[1]), `{"jsonrpc":"2.0","id":"L","result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"L"}}}`)) {
+				t.Fatalf("listen events %q; want its acknowledgement, then its completion only if the proxy ended it (%v)", got, (e.Ending == lifecycle.Shutdown))
 			}
 			eventually(t, "the upstream to see the listen cancelled", func() bool { return len(b.upstreamCancellations(t)) == 1 })
 			b.noFailureLogged(t)
@@ -260,8 +231,8 @@ func TestAnInitializeWhoseWriteFailsAsItsRequestEndsLogsNoInitializeFailureAndIt
 		{"a notification first", "-init=lognhold", "the notification", `"method":"notifications/message"`},
 		{"its result", "", "the result", `"result":`},
 	} {
-		for _, e := range endings {
-			t.Run(s.name+", "+e.name, func(t *testing.T) {
+		for _, e := range lifecycle.ContextEndings {
+			t.Run(s.name+", "+e.Ending.String(), func(t *testing.T) {
 				b := newBridge(t, func(c *Config) {
 					if s.init != "" {
 						c.Command = append(c.Command, s.init)
@@ -269,7 +240,7 @@ func TestAnInitializeWhoseWriteFailsAsItsRequestEndsLogsNoInitializeFailureAndIt
 				})
 				w := newGatedWriter(2) // the stream's start, then its first event, whose write fails
 				w.fail = errBrokenPipe
-				ctx, end := e.start()
+				ctx, end := e.Start(context.Background())
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
@@ -311,16 +282,16 @@ func TestARequestThatEndsWhileItsMCPSessionsProcessIsStoppingIsAnsweredByHowItEn
 		{"request", http.MethodPost, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`},
 		{"GET stream", http.MethodGet, ""},
 	} {
-		for _, e := range endings {
-			t.Run(m.name+", "+e.name, func(t *testing.T) {
+		for _, e := range lifecycle.ContextEndings {
+			t.Run(m.name+", "+e.Ending.String(), func(t *testing.T) {
 				b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-stubborn"} })
 				sid := b.initialize(t, "alice")
 				if res := b.do(t, context.Background(), http.MethodDelete, "alice", sid, ""); res.StatusCode != http.StatusNoContent {
 					t.Fatalf("DELETE: status %d", res.StatusCode)
 				}
-				ctx, end := e.start()
+				ctx, end := e.Start(context.Background())
 				end()
-				e.answered(t, b.serve(ctx, m.method, "alice", sid, m.body))
+				e.Answered(t, b.serve(ctx, m.method, "alice", sid, m.body))
 				b.noFailureLogged(t)
 				if b.m.Len() != 1 {
 					t.Fatalf("Len = %d: the test needs the process still stopping", b.m.Len())
@@ -335,15 +306,15 @@ func TestARequestThatEndsWhileItsMCPSessionsProcessIsStoppingIsAnsweredByHowItEn
 // it ended (#552). Only a request still live is answered by why the send failed: 404 if its process
 // exited, so its MCP client starts a new session, and 502 with a warning for any other failure.
 func TestAFailedSendIsAnsweredByHowItsRequestEndedBeforeWhyItFailed(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
 			s := &session{log: slog.New(log)}
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			end()
 			w := httptest.NewRecorder()
 			s.sendFailed(w, httptest.NewRequestWithContext(ctx, http.MethodPost, "/", nil), ErrExited)
-			e.answered(t, w)
+			e.Answered(t, w)
 			if got := log.warnings(); len(got) != 0 {
 				t.Fatalf("logged %v; want nothing at WARN or above for a request that ended", got)
 			}
@@ -387,11 +358,11 @@ func TestAFailedSendIsAnsweredByHowItsRequestEndedBeforeWhyItFailed(t *testing.T
 // user" warning, never answered as if it were its own session's request that ended (#552 keeps the
 // user check first).
 func TestAnEndedRequestToAnotherUsersMCPSessionIs404AndWarned(t *testing.T) {
-	for _, e := range endings {
-		t.Run(e.name, func(t *testing.T) {
+	for _, e := range lifecycle.ContextEndings {
+		t.Run(e.Ending.String(), func(t *testing.T) {
 			b := newBridge(t, nil)
 			sid := b.initialize(t, "alice")
-			ctx, end := e.start()
+			ctx, end := e.Start(context.Background())
 			end()
 			w := b.serve(ctx, http.MethodPost, "bob", sid, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 			if w.Code != http.StatusNotFound || w.Body.String() != "session not found\n" {

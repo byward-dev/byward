@@ -338,15 +338,12 @@ func notStarted(t *testing.T, end lifecycle.Ending, want relayCell) {
 	log := logging.New(logs, "json")
 	h := logging.Middleware(log, New(log, u))
 	ctx := t.Context()
-	switch end {
-	case lifecycle.ClientGone:
-		var cancel func()
-		ctx, cancel = context.WithCancel(ctx)
-		cancel()
-	case lifecycle.Shutdown:
-		var shutDown func()
-		ctx, shutDown = shutdown.WithCancel(ctx)
-		shutDown()
+	for _, e := range lifecycle.ContextEndings {
+		if e.Ending == end {
+			var stop func()
+			ctx, stop = e.Start(ctx)
+			stop()
+		}
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp", strings.NewReader(toolsList)))
