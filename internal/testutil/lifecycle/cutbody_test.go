@@ -35,7 +35,19 @@ func TestACutBodyStartsOnItsFirstByteAndEndsAsItIsTold(t *testing.T) {
 				t.Fatal("not started once its first byte was read")
 			}
 			tc.end(b)
-			rest, err := io.ReadAll(b)
+			type read struct {
+				rest []byte
+				err  error
+			}
+			got := make(chan read, 1)
+			go func() { rest, err := io.ReadAll(b); got <- read{rest, err} }()
+			var r read
+			select {
+			case r = <-got:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the rest of the body never ended")
+			}
+			rest, err := r.rest, r.err
 			if got := string(first) + string(rest); got != tc.want || (err != nil) != tc.wantFail {
 				t.Errorf("read %q, error %v; want %q, failing %v", got, err, tc.want, tc.wantFail)
 			}

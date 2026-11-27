@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,10 +40,7 @@ var refusals = map[string]func(t *testing.T) refusable{
 			lift:   func() { e.b.cfg.Clients = before }}
 	},
 	"document refused": func(t *testing.T) refusable {
-		d := clientdocs.Load(t, "claude-ai")
-		mode := new(atomic.Int32)
-		cimd := withCIMD(clientdocs.Serve(t, d))
-		e := newEnv(t, func(c *Config) { cimd(c); c.Clients = switchable{c.Clients, mode} })
+		e, d, mode := cimdEnv(t)
 		return refusable{e: e, d: d, reason: "client metadata no longer valid",
 			refuse: func() { mode.Store(modeRefused) },
 			lift:   func() { mode.Store(modeOK) }}

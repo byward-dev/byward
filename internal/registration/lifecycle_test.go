@@ -51,15 +51,16 @@ func cmpWant(want error) any {
 // the leader's goroutine has finished: it deletes its call before it releases its waiters).
 func idle(t *testing.T, r *CIMDRegistry) {
 	t.Helper()
+	var n, slots int
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		r.mu.Lock()
-		n, slots := len(r.inflight), len(r.slots)
+		n, slots = len(r.inflight), len(r.slots)
 		r.mu.Unlock()
 		if n == 0 && slots == 0 {
 			return
 		}
 	}
-	t.Fatalf("the registry still holds %d fetches and %d slots", len(r.inflight), len(r.slots))
+	t.Fatalf("the registry still holds %d fetches and %d slots", n, slots)
 }
 
 // gated is a registry whose fetches wait for open, closed at the latest when t ends, so no
@@ -108,9 +109,10 @@ func TestTheCIMDFetchLifecycleMatrix(t *testing.T) {
 	// fetch slots is the third way, which TestFetchesInFlightAreCapped pins.
 	m[at(lifecycle.Completes, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
 		t.Run("a fresh copy", func(t *testing.T) {
-			r, f, open := gated(t, ok("max-age=3600"))
-			open()
+			f, c := &fakeFetch{replies: map[string][]reply{cimdID: {ok("max-age=3600")}}}, newClock()
+			r := newReg(f, c, nil, nil)
 			answered(t, lookupIn(r, context.Background()), nil)
+			c.Advance(MinCIMDRetry + time.Second) // past the retry gap, inside max-age: only a fresh copy answers without a fetch
 			answered(t, lookupIn(r, context.Background()), nil)
 			if n := f.calls.Load(); n != 1 {
 				t.Errorf("%d fetches; want the copy to answer the second lookup", n)
@@ -175,20 +177,26 @@ func TestTheCIMDFetchLifecycleMatrix(t *testing.T) {
 		})
 	}
 
-	// The shared fetch answers its leader and every waiter alike.
-	m[at(lifecycle.Completes, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
-		r, f, open := gated(t, ok("max-age=3600"))
+	// shared runs a leader and a joined waiter on one fetch that replies rep, and fails t unless
+	// both are answered want and the registry lets the fetch go.
+	shared := func(t *testing.T, rep reply, want error) *fakeFetch {
+		t.Helper()
+		r, f, open := gated(t, rep)
 		leader := lookupIn(r, context.Background())
 		waitForFetches(t, f, 1)
 		waiter := lookupIn(r, context.Background())
 		waitForWaiters(t, r, 1)
 		open()
-		answered(t, leader, nil)
-		answered(t, waiter, nil)
-		if n := f.calls.Load(); n != 1 {
+		answered(t, leader, want)
+		answered(t, waiter, want)
+		idle(t, r)
+		return f
+	}
+	// The shared fetch answers its leader and every waiter alike.
+	m[at(lifecycle.Completes, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
+		if n := shared(t, ok("max-age=3600"), nil).calls.Load(); n != 1 {
 			t.Errorf("%d fetches; want one shared", n)
 		}
-		idle(t, r)
 	})
 	// The metadata host fails the shared fetch: every lookup gets its outcome. A transient
 	// failure is unavailable; a refused or invalid document refuses the client.
@@ -201,17 +209,7 @@ func TestTheCIMDFetchLifecycleMatrix(t *testing.T) {
 			"a refused document":  {gone(), ErrMetadataRefused},
 			"an invalid document": {invalidDoc(), ErrMetadataRefused},
 		} {
-			t.Run(name, func(t *testing.T) {
-				r, f, open := gated(t, tc.reply)
-				leader := lookupIn(r, context.Background())
-				waitForFetches(t, f, 1)
-				waiter := lookupIn(r, context.Background())
-				waitForWaiters(t, r, 1)
-				open()
-				answered(t, leader, tc.want)
-				answered(t, waiter, tc.want)
-				idle(t, r)
-			})
+			t.Run(name, func(t *testing.T) { shared(t, tc.reply, tc.want) })
 		}
 		t.Run("a fetch that panics", func(t *testing.T) {
 			calls := new(atomic.Int32)
@@ -223,15 +221,7 @@ func TestTheCIMDFetchLifecycleMatrix(t *testing.T) {
 	// The fetch's bound runs out (the SSRF guard's timeout, a transient failure): every lookup
 	// gets unavailable. The bound itself is the guard's, in real time, which its own test pins.
 	m[at(lifecycle.Timeout, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
-		r, f, open := gated(t, reply{err: context.DeadlineExceeded})
-		leader := lookupIn(r, context.Background())
-		waitForFetches(t, f, 1)
-		waiter := lookupIn(r, context.Background())
-		waitForWaiters(t, r, 1)
-		open()
-		answered(t, leader, ErrUnavailable)
-		answered(t, waiter, ErrUnavailable)
-		idle(t, r)
+		shared(t, reply{err: context.DeadlineExceeded}, ErrUnavailable)
 	})
 	lifecycle.Run(t, m)
 }

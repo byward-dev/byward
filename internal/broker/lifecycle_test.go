@@ -36,7 +36,7 @@ func (e *env) serveIn(ctx context.Context, r *http.Request) *httptest.ResponseRe
 	return w
 }
 
-// formRequest is a POST of a form to path, from a browser on our origin.
+// formRequest is a POST of a form to path, from a browser on our origin, as answer sends one.
 func formRequest(path string, body io.Reader) *http.Request {
 	r := httptest.NewRequest(http.MethodPost, issuer+path, body)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -75,6 +75,7 @@ func (e *env) marks() (int, int) { return len(e.logs.String()), len(e.audit.Stri
 func (e *env) cutIn(t *testing.T, end lifecycle.Ended, r *http.Request, body *lifecycle.CutBody) *httptest.ResponseRecorder {
 	t.Helper()
 	ctx, stop := end.Start(context.Background())
+	defer stop() // ends the request on a failure path too, so its serve goroutine returns
 	got := make(chan *httptest.ResponseRecorder, 1)
 	go func() { got <- e.serveIn(ctx, r) }()
 	select {
@@ -94,22 +95,11 @@ func (e *env) cutIn(t *testing.T, end lifecycle.Ended, r *http.Request, body *li
 	}
 }
 
-// ended is a request context that ended as e does.
+// endedCtx is a request context that ended as e does.
 func endedCtx(e lifecycle.Ended) context.Context {
 	ctx, stop := e.Start(context.Background())
 	stop()
 	return ctx
-}
-
-// cimdEnv is a broker with CIMD on whose client lookups mode switches, and a client ID that
-// resolves: the claude-ai document, which may ask for offline_access.
-func cimdEnv(t *testing.T) (*env, clientdocs.Doc, *atomic.Int32) {
-	t.Helper()
-	d := clientdocs.Load(t, "claude-ai")
-	mode := new(atomic.Int32)
-	cimd := withCIMD(clientdocs.Serve(t, d))
-	e := newEnv(t, func(c *Config) { cimd(c); c.Clients = switchable{c.Clients, mode} })
-	return e, d, mode
 }
 
 const (
@@ -127,7 +117,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 		whole       = "the broker writes whole answers: no interim response, stream, trailer or upgrade"
 		noOutbound  = "nothing goes outbound before the broker reads a body or looks a client up"
 		noPreBound  = "the broker sets no bound on its work before a body read or lookup"
-		storeCalls  = "a request that ended with its body read runs to completion: memstore ignores ctx, so the matrix cannot show a SQL store's answer to a store call under an ended context (a class issue of its own, #672)"
+		storeCalls  = "a request that ended with its body read runs to completion; its store calls under the ended context are #693, which memstore cannot show"
 		readBound   = "the server's ReadTimeout bounds a stalled body, not the broker"
 		inFlightOut = "nothing goes outbound while the broker reads a body"
 	)
@@ -231,8 +221,6 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					e.pinned(t, e.serveIn(endedCtx(end), formRequest(tc.path, strings.NewReader(f.Encode()))), lm, am, unavailableToken(tc.what))
 				})
 			}
-			// After the IdP's code is spent: today the callback logs the failed lookup and goes on,
-			// with a grant that cannot refresh.
 			// Before the lookup, the callback redeems the IdP's code: a request that ended there fails
 			// the sign-in as the IdP's error.
 			t.Run("/callback, the IdP's code exchange", func(t *testing.T) {
@@ -258,6 +246,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				r := httptest.NewRequest(http.MethodGet, issuer+"/callback/entra?"+cb.RawQuery, nil)
 				r.AddCookie(cookie)
 				ctx, stop := end.Start(context.Background())
+				defer stop()
 				got := make(chan *httptest.ResponseRecorder, 1)
 				go func() { got <- e.serveIn(ctx, r) }()
 				select {
@@ -266,7 +255,13 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					t.Fatal("the callback never looked the client up")
 				}
 				stop()
-				e.pinned(t, <-got, lm, am, brokerCell{status: http.StatusFound,
+				var w *httptest.ResponseRecorder
+				select {
+				case w = <-got:
+				case <-time.After(5 * time.Second):
+					t.Fatal("the callback never answered")
+				}
+				e.pinned(t, w, lm, am, brokerCell{status: http.StatusFound,
 					warns: []string{"looking up the client failed, so this grant cannot refresh"}, audit: []string{"login success"}})
 			})
 		})

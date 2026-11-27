@@ -414,14 +414,22 @@ func TestAnUnknownClientIDIsLoggedOnlyForCIMD(t *testing.T) {
 	}
 }
 
+// cimdEnv is a broker with CIMD on, serving the claude-ai document (which may ask for
+// offline_access), whose client lookups mode switches.
+func cimdEnv(t *testing.T) (*env, clientdocs.Doc, *atomic.Int32) {
+	t.Helper()
+	d := clientdocs.Load(t, "claude-ai")
+	mode := new(atomic.Int32)
+	cimd := withCIMD(clientdocs.Serve(t, d))
+	e := newEnv(t, func(c *Config) { cimd(c); c.Clients = switchable{c.Clients, mode} })
+	return e, d, mode
+}
+
 // offlineCIMD signs a user in with the claude.ai document and offline_access and returns the
 // redeemed token response; mode switches the client's metadata afterwards.
 func offlineCIMD(t *testing.T) (e *env, d clientdocs.Doc, mode *atomic.Int32, tokens map[string]any) {
 	t.Helper()
-	d = clientdocs.Load(t, "claude-ai")
-	mode = new(atomic.Int32)
-	cimd := withCIMD(clientdocs.Serve(t, d))
-	e = newEnv(t, func(c *Config) { cimd(c); c.Clients = switchable{c.Clients, mode} })
+	e, d, mode = cimdEnv(t)
 	back := e.signIn(t, url.Values{"client_id": {d.ClientID}, "redirect_uri": {d.Redirect}, "scope": {"mcp offline_access"}})
 	res, body := e.redeem(t, back.Query().Get("code"), url.Values{"client_id": {d.ClientID}, "redirect_uri": {d.Redirect}})
 	if res.StatusCode != http.StatusOK || body["refresh_token"] == nil {
