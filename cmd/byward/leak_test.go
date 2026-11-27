@@ -21,8 +21,9 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/pgtest"
 )
 
-// canary stands for the secret in secretForms, the 14 forms of a secret in the #485 leak matrix (the
-// "14 secret shapes" of ADR-0031 §1). No other value in the test holds it.
+// canary stands for the secret in secretForms: the 14 forms of a secret in the #485 leak matrix (the
+// "14 secret shapes" of ADR-0031 §1), and the kinds of the catalogue of secrets (#657). No other
+// value in the test holds it.
 const canary = "LK7CANARY"
 
 var secretForms = []struct{ name, value string }{
@@ -40,6 +41,14 @@ var secretForms = []struct{ name, value string }{
 	{"no scheme", "//h.example/;tok=LK7CANARY"},
 	{"no slashes", "https:h.example/;tok=LK7CANARY"},
 	{"one slash", "https:/h.example/;tok=LK7CANARY"},
+	// The catalogue's kinds (internal/logging/secretkind.go, #657), each holding the canary; the URL
+	// with a password and the key=value password are the userinfo and DSN forms above.
+	{"GitHub token", "ghp_" + "LK7CANARY" + "Q7Q7Q7"},
+	{"Slack token", "xoxb-" + "LK7CANARY" + "-12345"},
+	{"JWT", "eyJ" + "hbGciOiJSUzI1NiJ9." + "LK7CANARY" + ".c2lnbmF0dXJl"},
+	{"GitHub token after a line break", "x\n" + "ghp_" + "LK7CANARY" + "Q7Q7Q7"},
+	{"GitHub token percent-escaped", "https://h.example/ghp%5F" + "LK7CANARY" + "Q7Q7Q7"},
+	{"opaque Bearer credential", "Bearer " + "LK7CANARY" + "Q7Q7Q7Q7"}, // redact-only: a Known gap (#657)
 }
 
 // hostForm is a secret in a URL's host, which is a valid host name. A URL setting's shape shows an
@@ -172,7 +181,7 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 	// setting that is not secret refuses at least the form with a password in a URL, as a secret's
 	// kind (#495), so only secrets and the command, whose arguments are never shown, are left.
 	acceptsEveryForm := []string{"entra-client-certificate", "entra-client-secret", "oidc-client-key",
-		"oidc-client-secret", "store-postgres-dsn", "upstream-command", "upstream-credential"}
+		"oidc-client-secret", "store-postgres-dsn", "upstream-command"}
 	for _, s := range settings {
 		switch refuses := refusedTried[s.Name] > 0; {
 		case refuses && slices.Contains(acceptsEveryForm, s.Name):
@@ -555,8 +564,12 @@ func TestOperatorCommandsShowNoArgumentTheyAreGiven(t *testing.T) {
 	}
 	for _, form := range append(slices.Clone(secretForms), hostForm) {
 		v := form.value
+		oidcWant := storeMissingLine
+		if strings.ContainsFunc(v, func(r rune) bool { return r < ' ' || r > '~' }) {
+			oidcWant = refused(v) // a sub is printable ASCII
+		}
 		run(t, form.name, append(usageCells(v),
-			cell{"revoke-user, oidc", storeMissingLine, []string{"revoke-user", v}, oidcEnv}))
+			cell{"revoke-user, oidc", oidcWant, []string{"revoke-user", v}, oidcEnv}))
 	}
 	for _, form := range tokenForms {
 		v := form.value

@@ -1,0 +1,121 @@
+# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. surface | kind | outcome (#657)
+startup log, a free-text setting | userinfo | refused
+startup log, a free-text setting | DSN key=value | refused
+startup log, a free-text setting | GitHub token | refused
+startup log, a free-text setting | Slack token | refused
+startup log, a free-text setting | JWT | refused
+startup log, a free-text setting | GitHub token after a line break | refused
+startup log, a free-text setting | GitHub token percent-escaped | refused
+startup log, a free-text setting | opaque Bearer credential | redacted
+--print-config, a free-text setting | userinfo | refused
+--print-config, a free-text setting | DSN key=value | refused
+--print-config, a free-text setting | GitHub token | refused
+--print-config, a free-text setting | Slack token | refused
+--print-config, a free-text setting | JWT | refused
+--print-config, a free-text setting | GitHub token after a line break | refused
+--print-config, a free-text setting | GitHub token percent-escaped | refused
+--print-config, a free-text setting | opaque Bearer credential | shown
+--print-config, a URL setting's path | userinfo | kept out
+--print-config, a URL setting's path | DSN key=value | refused
+--print-config, a URL setting's path | GitHub token | refused
+--print-config, a URL setting's path | Slack token | refused
+--print-config, a URL setting's path | JWT | refused
+--print-config, a URL setting's path | GitHub token after a line break | refused
+--print-config, a URL setting's path | GitHub token percent-escaped | refused
+--print-config, a URL setting's path | opaque Bearer credential | refused
+--print-config, a list setting's entry | userinfo | refused
+--print-config, a list setting's entry | DSN key=value | refused
+--print-config, a list setting's entry | GitHub token | refused
+--print-config, a list setting's entry | Slack token | refused
+--print-config, a list setting's entry | JWT | refused
+--print-config, a list setting's entry | GitHub token after a line break | refused
+--print-config, a list setting's entry | GitHub token percent-escaped | refused
+--print-config, a list setting's entry | opaque Bearer credential | refused
+check --offline, a free-text setting | userinfo | refused
+check --offline, a free-text setting | DSN key=value | refused
+check --offline, a free-text setting | GitHub token | refused
+check --offline, a free-text setting | Slack token | refused
+check --offline, a free-text setting | JWT | refused
+check --offline, a free-text setting | GitHub token after a line break | refused
+check --offline, a free-text setting | GitHub token percent-escaped | refused
+check --offline, a free-text setting | opaque Bearer credential | kept out
+doctor, a free-text setting | userinfo | refused
+doctor, a free-text setting | DSN key=value | refused
+doctor, a free-text setting | GitHub token | refused
+doctor, a free-text setting | Slack token | refused
+doctor, a free-text setting | JWT | refused
+doctor, a free-text setting | GitHub token after a line break | refused
+doctor, a free-text setting | GitHub token percent-escaped | refused
+doctor, a free-text setting | opaque Bearer credential | kept out
+init entra --tenant | userinfo | refused
+init entra --tenant | DSN key=value | refused
+init entra --tenant | GitHub token | refused
+init entra --tenant | Slack token | refused
+init entra --tenant | JWT | refused
+init entra --tenant | GitHub token after a line break | refused
+init entra --tenant | GitHub token percent-escaped | refused
+init entra --tenant | opaque Bearer credential | refused
+init entra --public-url, in its path | userinfo | refused
+init entra --public-url, in its path | DSN key=value | refused
+init entra --public-url, in its path | GitHub token | refused
+init entra --public-url, in its path | Slack token | refused
+init entra --public-url, in its path | JWT | refused
+init entra --public-url, in its path | GitHub token after a line break | refused
+init entra --public-url, in its path | GitHub token percent-escaped | refused
+init entra --public-url, in its path | opaque Bearer credential | refused
+init entra --upstream-url, in its query | userinfo | refused
+init entra --upstream-url, in its query | DSN key=value | refused
+init entra --upstream-url, in its query | GitHub token | refused
+init entra --upstream-url, in its query | Slack token | refused
+init entra --upstream-url, in its query | JWT | refused
+init entra --upstream-url, in its query | GitHub token after a line break | refused
+init entra --upstream-url, in its query | GitHub token percent-escaped | refused
+init entra --upstream-url, in its query | opaque Bearer credential | refused
+init entra --secret-years | userinfo | refused
+init entra --secret-years | DSN key=value | refused
+init entra --secret-years | GitHub token | refused
+init entra --secret-years | Slack token | refused
+init entra --secret-years | JWT | refused
+init entra --secret-years | GitHub token after a line break | refused
+init entra --secret-years | GitHub token percent-escaped | refused
+init entra --secret-years | opaque Bearer credential | refused
+init entra --credential | userinfo | refused
+init entra --credential | DSN key=value | refused
+init entra --credential | GitHub token | refused
+init entra --credential | Slack token | refused
+init entra --credential | JWT | refused
+init entra --credential | GitHub token after a line break | refused
+init entra --credential | GitHub token percent-escaped | refused
+init entra --credential | opaque Bearer credential | refused
+revoke-user, the user key | userinfo | refused
+revoke-user, the user key | DSN key=value | refused
+revoke-user, the user key | GitHub token | refused
+revoke-user, the user key | Slack token | refused
+revoke-user, the user key | JWT | refused
+revoke-user, the user key | GitHub token after a line break | refused
+revoke-user, the user key | GitHub token percent-escaped | refused
+revoke-user, the user key | opaque Bearer credential | refused
+a log attribute, JSON | userinfo | redacted
+a log attribute, JSON | DSN key=value | redacted
+a log attribute, JSON | GitHub token | redacted
+a log attribute, JSON | Slack token | redacted
+a log attribute, JSON | JWT | redacted
+a log attribute, JSON | GitHub token after a line break | redacted
+a log attribute, JSON | GitHub token percent-escaped | redacted
+a log attribute, JSON | opaque Bearer credential | redacted
+a log attribute, text | userinfo | redacted
+a log attribute, text | DSN key=value | redacted
+a log attribute, text | GitHub token | redacted
+a log attribute, text | Slack token | redacted
+a log attribute, text | JWT | redacted
+a log attribute, text | GitHub token after a line break | redacted
+a log attribute, text | GitHub token percent-escaped | redacted
+a log attribute, text | opaque Bearer credential | redacted
+a stdio upstream's stderr line, as stdio logs it | userinfo | redacted
+a stdio upstream's stderr line, as stdio logs it | DSN key=value | redacted
+a stdio upstream's stderr line, as stdio logs it | GitHub token | redacted
+a stdio upstream's stderr line, as stdio logs it | Slack token | redacted
+a stdio upstream's stderr line, as stdio logs it | JWT | redacted
+a stdio upstream's stderr line, as stdio logs it | GitHub token after a line break | redacted
+a stdio upstream's stderr line, as stdio logs it | GitHub token percent-escaped | redacted
+a stdio upstream's stderr line, as stdio logs it | opaque Bearer credential | redacted
