@@ -156,9 +156,15 @@ func (r *stdioRig) check(t *testing.T, w *brokenWriter, done <-chan struct{}, wa
 	}
 	var got held
 	deadline := time.Now().Add(guard) // what a request held is let go of by goroutines after it returns
-	for got = r.held(); got != (held{live: n, sessions: n}) && time.Now().Before(deadline); got = r.held() {
-		if r.stopping() { // a stopping process is sent SIGTERM, then SIGKILL, a KillGrace apart
+	// A stopping process is sent SIGTERM, then SIGKILL, a KillGrace apart; a few graces take any
+	// process there, and stay far below IdleTimeout, so no live process's idle timer fires.
+	for graces := 0; ; {
+		if got = r.held(); got == (held{live: n, sessions: n}) || !time.Now().Before(deadline) {
+			break
+		}
+		if graces < 4 && r.stopping() {
 			r.clk.Advance(DefaultKillGrace)
+			graces++
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -198,7 +204,10 @@ func (r *stdioRig) crashLogged(t *testing.T) {
 	eventually(t, "the process's exit to be logged", func() bool {
 		return len(r.log.with(exited))+len(r.log.with("upstream process exited")) == 1
 	})
-	if len(r.log.with(exited)) == 1 {
+	if exits := r.log.with(exited); len(exits) == 1 {
+		if exits[0].level != slog.LevelWarn {
+			t.Errorf("the killed process's exit was logged at %v; want WARN", exits[0].level)
+		}
 		return
 	}
 	if stops := r.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "stdout_closed" {
@@ -232,7 +241,8 @@ func (r *stdioRig) end(e lifecycle.Ending, stop func()) {
 	stop()
 }
 
-// endedAs is the ContextEndings entry for e.
+// endedAs is the ContextEndings entry for e; the relay's notStarted (relay/lifecycle_test.go) looks
+// one up too.
 func endedAs(e lifecycle.Ending) lifecycle.Ended {
 	for _, c := range lifecycle.ContextEndings {
 		if c.Ending == e {
@@ -272,10 +282,23 @@ var (
 
 // inFlight starts a request whose body the bridge is still reading: the client has sent its first
 // byte and holds the rest.
-func (r *stdioRig) inFlight(ctx context.Context, sid, body string) (*brokenWriter, <-chan struct{}, *io.PipeWriter) {
+func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string) (*brokenWriter, <-chan struct{}, *io.PipeWriter) {
+	t.Helper()
 	pr, pw := io.Pipe()
 	w, done := r.start(ctx, http.MethodPost, sid, pr)
-	_, _ = io.WriteString(pw, body[:1]) // returns once the bridge has read it
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		_, _ = io.WriteString(pw, body[:1]) // returns once the bridge has read it, or the pipe is closed
+	}()
+	select {
+	case <-read:
+	case <-done:
+		t.Fatalf("the bridge answered %q before it read the request body", w.written())
+	case <-time.After(guard):
+		_ = pw.Close()
+		t.Fatal("the bridge never read the request body")
+	}
 	return w, done, pw
 }
 
@@ -284,7 +307,7 @@ func (r *stdioRig) inFlight(ctx context.Context, sid, body string) (*brokenWrite
 func (r *stdioRig) bodyCut(t *testing.T, end lifecycle.Ending, sid, body string, want stdioCell) {
 	t.Helper()
 	ctx, stop := endedAs(end).Start(context.Background())
-	w, done, pw := r.inFlight(ctx, sid, body)
+	w, done, pw := r.inFlight(t, ctx, sid, body)
 	r.end(end, stop)
 	pw.CloseWithError(errors.New("connection reset by peer"))
 	r.check(t, w, done, want)
@@ -396,7 +419,7 @@ func legacyInitializeMatrix() map[lifecycle.Cell]lifecycle.Case {
 	m[at(lifecycle.Timeout, lifecycle.NotStarted)] = lifecycle.NotRun("SpawnTimeout is 30 s of real time around the spawn, which the start hook cannot see; TestStartThatOverrunsTheSpawnTimeoutKillsTheProcessAndLeavesNothingBehind pins it at the Manager")
 	m[at(lifecycle.Completes, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
-		w, done, pw := r.inFlight(context.Background(), "", initialize)
+		w, done, pw := r.inFlight(t, context.Background(), "", initialize)
 		_, _ = io.WriteString(pw, initialize[1:])
 		_ = pw.Close()
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"protocolVersion"`, alive: true})
@@ -508,7 +531,7 @@ func legacyRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 	m[at(lifecycle.Completes, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
 		sid := r.session(t)
-		w, done, pw := r.inFlight(context.Background(), sid, toolsList)
+		w, done, pw := r.inFlight(t, context.Background(), sid, toolsList)
 		_, _ = io.WriteString(pw, toolsList[1:])
 		_ = pw.Close()
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"id":2`, alive: true})
@@ -527,6 +550,7 @@ func legacyRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 		sid := r.session(t)
 		w, done := r.start(context.Background(), http.MethodPost, sid, strings.NewReader(holdBody))
 		r.saidOnStderr(t, "holding")
+		eventually(t, "the stream to start", w.hasStarted)
 		release := r.serve(context.Background(), http.MethodPost, "alice", sid, `{"jsonrpc":"2.0","id":3,"method":"release"}`)
 		if release.Code != http.StatusOK {
 			t.Fatalf("release: status %d", release.Code)
@@ -538,6 +562,7 @@ func legacyRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 		sid := r.session(t)
 		w, done := r.start(context.Background(), http.MethodPost, sid, strings.NewReader(holdBody))
 		r.saidOnStderr(t, "holding")
+		eventually(t, "the stream to start", w.hasStarted)
 		r.signal(t, syscall.SIGKILL)
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: processEnded, crash: true})
 	})

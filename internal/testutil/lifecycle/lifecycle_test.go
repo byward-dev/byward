@@ -57,7 +57,9 @@ func TestEveryEndingAndStateHasAName(t *testing.T) {
 	for _, s := range States {
 		names = append(names, s.String())
 	}
-	if want := append(endingNames[:], stateNames[:]...); !slices.Equal(names, want) {
+	want := []string{"completes", "client gone", "upstream gone", "timeout", "shutdown",
+		"not started", "body in flight", "awaiting headers", "after 1xx", "streaming", "trailer pending", "upgrade requested"}
+	if !slices.Equal(names, want) {
 		t.Errorf("names %q; want %q", names, want)
 	}
 	if slices.Contains(names, "") || len(slices.Compact(slices.Sorted(slices.Values(names)))) != len(names) {
