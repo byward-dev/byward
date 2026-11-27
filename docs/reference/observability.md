@@ -205,8 +205,9 @@ One JSON line per request: `request_id`, `method`, `path` (never the query strin
 bodies, tokens and secrets are never logged, and bearer-shaped values are redacted.
 
 A request to the upstream whose client went away before its answer started records `status` 499, nginx's "client closed
-request": one relayed to an HTTP upstream, one sent to a stdio upstream process, or one waiting for its On-Behalf-Of
-token. Nothing is sent, since the client is gone. The same status reaches `byward_http_request_duration_seconds`
+request": one relayed to an HTTP upstream, one sent to a stdio upstream process, one whose body the stdio bridge was
+still reading, one waiting for the `server/discover` probe that tells a stdio upstream's protocol era, or one waiting
+for its On-Behalf-Of token. Nothing is sent, since the client is gone. The same status reaches `byward_http_request_duration_seconds`
 (class `4xx`) and the server span, so a client that gave up is not counted as an upstream failure. Such a request still
 waiting when the proxy shuts down is answered 503 `the proxy is shutting down`, and its connection is closed
 (`Connection: close` over HTTP/1.1, GOAWAY over HTTP/2), so the client can retry. In neither case, nor during a stream

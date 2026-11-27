@@ -259,6 +259,9 @@ type modernRequest struct {
 // modernPost serves one session-less modern-era POST; meta is the message's, already read.
 func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity, msg []byte, env envelope, meta requestMeta) {
 	if b.cap.legacy() {
+		if shutdown.AnswerIfEnded(w, r) { // it ended while its body was read (#672)
+			return
+		}
 		legacyFallback(w)
 		return
 	}
@@ -302,6 +305,11 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 		return
 	}
 	if !modern {
+		// The probe runs on its own context, its verdict shared, so a request that ended meanwhile
+		// is answered by how it ended, not as a modern request to a legacy upstream (#672).
+		if shutdown.AnswerIfEnded(w, r) {
+			return
+		}
 		legacyFallback(w)
 		return
 	}
