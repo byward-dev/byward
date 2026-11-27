@@ -281,7 +281,8 @@ var silentDiscover bool
 var invalidDiscover bool
 
 // holdDiscover (flag -holddiscover, given before -modern) makes serveModern write "holding
-// discover" to stderr once it has read server/discover, then answer it only on SIGUSR1.
+// discover" to stderr once it has read server/discover, then answer it only on SIGUSR1; with -mcp
+// -invaliddiscover, serveMCP holds its -32602 the same way.
 var holdDiscover chan os.Signal
 
 // exitOnDiscover (flag -exitondiscover, given before -modern) makes serveModern exit with status 3

@@ -222,6 +222,9 @@ func (w *brokenWriter) breakIn(what string) {
 	w.broken = what
 }
 
+// acknowledged reports whether a listen's acknowledgement has been written.
+func (w *brokenWriter) acknowledged() bool { return strings.Contains(w.written(), "acknowledged") }
+
 func (w *brokenWriter) hasStarted() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -245,7 +248,7 @@ func TestAKeepAliveThatCannotBeWrittenCancelsTheListen(t *testing.T) {
 			w := &brokenWriter{header: http.Header{}}
 			done := make(chan struct{})
 			go func() { defer close(done); b.bridge.ServeHTTP(w, req) }()
-			eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+			eventually(t, "the acknowledgement", w.acknowledged)
 			w.breakIn(what)
 			b.clk.Advance(keepAliveInterval)
 			select {

@@ -202,7 +202,7 @@ func TestAListenEndedByTheProxyShuttingDownGetsItsCompletionAndOneWhoseMCPClient
 				defer close(done)
 				b.bridge.ServeHTTP(w, b.request(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...))
 			}()
-			eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+			eventually(t, "the acknowledgement", w.acknowledged)
 			end()
 			<-done
 			got := eventsOf(t, &http.Response{Header: w.header, Body: io.NopCloser(strings.NewReader(w.written()))}).all()

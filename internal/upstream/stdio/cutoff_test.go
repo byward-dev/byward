@@ -71,7 +71,7 @@ func observeStream(t *testing.T, modern, acked bool, open func(*bridgeHarness) *
 	cut := b.observed(t, w, open(b))
 	eventually(t, "the stream to start", w.hasStarted) // after its request reached the upstream
 	if acked {
-		eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+		eventually(t, "the acknowledgement", w.acknowledged)
 	}
 	return b, w, cut
 }

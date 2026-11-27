@@ -27,7 +27,7 @@ type stdioCell struct {
 	errTyp string   // the request line's error_type: why a started stream was cut off, or ""
 	closes bool     // the answer closes its connection
 	warns  []string // every WARN or ERROR line, by message, in any order, but a crash's
-	alive  bool     // the cell's process and its MCP session outlive the request
+	alive  bool     // the cell's process outlives the request, with its MCP session (legacy) or userConn (modern)
 	// crash is a cell whose process is killed. Its exit is logged as unexpected, at WARN, unless
 	// its stdout's end reached the bridge first: then it is logged as a stop for stdout_closed, at
 	// INFO (crashLogged).
@@ -39,7 +39,8 @@ type stdioCell struct {
 type stdioRig struct {
 	*bridgeHarness
 	h         http.Handler
-	modernEra bool // the cell's requests are of the modern era: a process outlives them as a userConn, not an MCP session
+	modernEra bool          // the cell's requests are of the modern era: a process outlives them as a userConn, not an MCP session
+	bound     time.Duration // how long check waits for the bridge to return: guard, or 100 times a real-time bound the cell sets
 }
 
 // newStdioRig serves the fake upstream in its legacy JSON-RPC mode, with flags.
@@ -63,7 +64,7 @@ func newRig(t *testing.T, edit func(*Config), modern bool, flags ...string) *std
 			edit(c)
 		}
 	})
-	return &stdioRig{bridgeHarness: b, h: logging.Middleware(slog.New(b.log), b.bridge), modernEra: modern}
+	return &stdioRig{bridgeHarness: b, h: logging.Middleware(slog.New(b.log), b.bridge), modernEra: modern, bound: guard}
 }
 
 // start serves a request as alice in the background on a writer read while it is written; the
@@ -151,12 +152,12 @@ func (r *stdioRig) held() held {
 
 // check waits for the bridge to return, then fails t unless the cell went as want says: the client
 // got want.body, the request line and the warnings are want's, and nothing is left held but the
-// process and its MCP session, if they outlive the request.
+// process and its MCP session or userConn, if they outlive the request.
 func (r *stdioRig) check(t *testing.T, w *brokenWriter, done <-chan struct{}, want stdioCell) {
 	t.Helper()
 	select {
 	case <-done:
-	case <-time.After(guard):
+	case <-time.After(r.bound):
 		t.Fatal("the bridge never returned")
 	}
 	if !strings.Contains(w.written(), want.body) {
@@ -389,10 +390,10 @@ func at(end lifecycle.Ending, state lifecycle.State) lifecycle.Cell {
 }
 
 // The stdio bridge's lifecycle matrix (#672): for a legacy initialize, a request to its MCP session
-// and the session's GET stream, and for a modern request and listen, every way the request ends crossed with every state its
-// work can be in pins what the MCP client gets, the request line and the warnings, and that the
-// request leaves nothing held: no lease, stream or entry in flight, and the process and MCP
-// session alive only if the cell says so.
+// and the session's GET stream, and for a modern request and listen, every way the request ends
+// crossed with every state its work can be in pins what the MCP client gets, the request line and
+// the warnings, and that the request leaves nothing held: no lease, stream or entry in flight, and
+// the process, with its MCP session or userConn, alive only if the cell says so.
 func TestTheStdioBridgeLifecycleMatrix(t *testing.T) {
 	t.Run("legacy initialize", func(t *testing.T) { lifecycle.Run(t, legacyInitializeMatrix()) })
 	t.Run("legacy request", func(t *testing.T) { lifecycle.Run(t, legacyRequestMatrix()) })
@@ -693,14 +694,16 @@ func (r *stdioRig) warm(t *testing.T) {
 // cancelledUpstream waits until the upstream has seen the cell's request cancelled.
 func (r *stdioRig) cancelledUpstream(t *testing.T) {
 	t.Helper()
-	eventually(t, "the upstream to see the request cancelled", func() bool { return len(r.upstreamCancellations(t)) == 1 })
+	if ids := r.awaitUpstreamCancellation(t); len(ids) != 1 {
+		t.Errorf("upstream cancellations %q; want the cell's request alone", ids)
+	}
 }
 
 func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 	m := map[lifecycle.Cell]lifecycle.Case{}
 	unreachableColumns(m)
 	echo := modernBody(`1`, "echo", "", `"tag":"lifecycle"`)
-	hold := modernBody(`"h"`, "hold", "", "")
+	hold := modernBody(`"h"`, "hold", `"progressToken":"p"`, "") // its token is routed (byToken) while it is held
 	bigEcho := modernBody(`1`, "echo", "", `"pad":"`+strings.Repeat("a", 512<<10)+`"`)
 	for _, end := range []lifecycle.Ending{lifecycle.ClientGone, lifecycle.Shutdown} {
 		m[at(end, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
@@ -785,10 +788,13 @@ func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 		r.check(t, w, done, stdioCell{status: http.StatusBadGateway, body: unavailable, warns: []string{relayFailed}, crash: true})
 	})
 	// The probe's own bound, a field tests shorten, in real time: an upstream that never answers it
-	// is taken for a legacy one. Waited on as an event; check's bounds are guard, over 100 times it.
+	// is taken for a legacy one. Waited on as an event, for up to 100 times it (r.bound). The
+	// bound also covers sending the probe (modern.go discover): one that runs out before the send is
+	// no verdict, a 502, so it is 500 ms, not the 50 ms a stalled machine could spend before it.
 	m[at(lifecycle.Timeout, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newModernRig(t, nil, "-mcp", "-silentdiscover")
-		r.bridge.probeTimeout = 50 * time.Millisecond
+		r.bridge.probeTimeout = 500 * time.Millisecond
+		r.bound = 100 * r.bridge.probeTimeout
 		w, done := r.modernStart(context.Background(), echo)
 		r.check(t, w, done, stdioCell{status: http.StatusBadRequest, body: "speaks MCP 2025-11-25"})
 	})
@@ -824,7 +830,7 @@ func modernListenMatrix() map[lifecycle.Cell]lifecycle.Case {
 	open := func(t *testing.T, r *stdioRig, ctx context.Context) (*brokenWriter, <-chan struct{}) {
 		t.Helper()
 		w, done := r.modernStart(ctx, listenBody)
-		eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+		eventually(t, "the acknowledgement", w.acknowledged)
 		return w, done
 	}
 	m[at(lifecycle.Completes, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) { // the upstream ends it
@@ -842,7 +848,9 @@ func modernListenMatrix() map[lifecycle.Cell]lifecycle.Case {
 		r.cancelledUpstream(t)
 	})
 	// The server ends the subscription: it says so with a completion result (2026-07-28
-	// subscriptions), so the stream ends whole, not cut.
+	// subscriptions), so the stream ends whole, not cut. Drain and the request's shutdown cause
+	// each lead there; TestDrainCompletesAndCancelsUpstreamEachOpenListen… and
+	// TestAListenEndedByTheProxyShuttingDown… pin each path.
 	m[at(lifecycle.Shutdown, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newModernRig(t, nil, "-modern")
 		ctx, stop := endedAs(lifecycle.Shutdown).Start(context.Background())
