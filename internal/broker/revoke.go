@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/ratelimit"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -32,6 +33,9 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
+		if shutdown.AnswerIfEnded(w, r) { // a request that ended as its body was read is answered by how it ended, and is no failed request (#672)
+			return
+		}
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_request", "the request body is not a valid form"})
 		return
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/shutdown"
 )
 
 // Registrar registers clients dynamically (RFC 7591, ADR-0008 §2-3).
@@ -52,6 +53,9 @@ func (b *Broker) register(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if shutdown.AnswerIfEnded(w, r) { // a request that ended as its body was read is answered by how it ended, and is no failed request (#672)
+			return
+		}
 		b.registrationFailed(w, r, RegistrationBadMetadata, http.StatusBadRequest, "invalid_client_metadata", "the request body could not be read")
 		return
 	}

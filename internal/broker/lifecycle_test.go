@@ -20,7 +20,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
-// brokerCell is what one lifecycle cell of the broker pins today.
+// brokerCell is what one lifecycle cell of the broker pins.
 type brokerCell struct {
 	status int
 	body   string   // in the answer
@@ -66,6 +66,14 @@ func (e *env) pinned(t *testing.T, w *httptest.ResponseRecorder, logMark, auditM
 	}
 }
 
+// endedAnswer fails t unless w answers a request that ended as end does (499 recorded, or 503 and
+// close at shutdown), with nothing logged as a failure or audited since the marks (#527).
+func (e *env) endedAnswer(t *testing.T, end lifecycle.Ended, w *httptest.ResponseRecorder, logMark, auditMark int) {
+	t.Helper()
+	end.Answered(t, w)
+	e.pinned(t, w, logMark, auditMark, brokerCell{status: end.Status, body: end.Body})
+}
+
 // marks are where the cell's own logs and audit events begin.
 func (e *env) marks() (int, int) { return len(e.logs.String()), len(e.audit.String()) }
 
@@ -102,22 +110,23 @@ func endedCtx(e lifecycle.Ended) context.Context {
 	return ctx
 }
 
-const (
-	bodyReadBug = "a request whose client goes away, or the proxy shuts down, while the broker reads its body is answered 400 as unreadable (register.go, token.go, revoke.go, consent.go), audited as a failed request, not answered by how it ended (shutdown.AnswerIfEnded: 499, or 503 and close); the broker never calls AnswerIfEnded"
-	waitBug     = "a client lookup whose request ended while it waited on the CIMD fetch (or a client's keys) is ErrUnavailable like a failed fetch: the broker answers 503 with WARN \"client metadata unavailable\" (and audits token_rejected at /token and /revoke), not by how it ended; /callback logs WARN and goes on, issuing a grant that cannot refresh; and a callback whose request ended during the IdP's code exchange fails the sign-in as the IdP's error, 502 with WARN \"IdP sign-in failed\""
-)
-
 // The broker's lifecycle matrix (#672): its requests' endings, crossed with the states its work
 // can be in: before its body read or client lookup, reading its body, and waiting on a client
-// lookup (the CIMD fetch, or a client's keys). Its cells are today's answers to requests that
-// ended (KnownResidual): the broker fix flips them to Pinned. The CIMD fetch's own cells are in
-// TestTheCIMDFetchLifecycleMatrix (internal/registration).
+// lookup (the CIMD fetch, or a client's keys) or the IdP. A request that ended is answered by how it
+// ended, with nothing logged as a failure or audited; a callback past its spent login finishes, so
+// a shutdown keeps its sign-in and a browser that went away gets nothing. The CIMD fetch's own cells
+// are in TestTheCIMDFetchLifecycleMatrix (internal/registration).
+//
+// The same class, outside these cells (#672 known residuals): /authorize's and /consent's IdP
+// discovery before a replica has cached it (AuthCodeURL) answers an ended request 502 and logs the
+// sign-in as failed; the throttled /authorize's lookup answers it 429, harmlessly; the admin consent
+// redirect has no wait (it logs one INFO line and shows a page).
 func TestTheBrokerLifecycleMatrix(t *testing.T) {
 	const (
 		whole       = "the broker writes whole answers: no interim response, stream, trailer or upgrade"
 		noOutbound  = "nothing goes outbound before the broker reads a body or looks a client up"
 		noPreBound  = "the broker sets no bound on its work before a body read or lookup"
-		storeCalls  = "a request that ended with its body read runs to completion; its store calls under the ended context are #693, which memstore cannot show"
+		storeCalls  = "a request that ended with its body read runs to completion; its store calls under the ended context are #693, which memstore cannot show (a callback's calls after its spent login are detached, so only its spendLogin is)"
 		readBound   = "the server's ReadTimeout bounds a stalled body, not the broker"
 		inFlightOut = "nothing goes outbound while the broker reads a body"
 	)
@@ -141,23 +150,21 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 	m[at(lifecycle.Timeout, lifecycle.AwaitingHeaders)] = lifecycle.NotRun("a fetch that times out is a transient failure, answered as upstream gone; TestTheCIMDFetchLifecycleMatrix pins the timeout")
 
 	for _, end := range lifecycle.ContextEndings {
-		m[at(end.Ending, lifecycle.BodyInFlight)] = lifecycle.KnownResidual("#672", bodyReadBug, func(t *testing.T) {
+		m[at(end.Ending, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 			t.Run("/register", func(t *testing.T) {
 				e := newEnv(t, withDCR(nil))
 				lm, am := e.marks()
 				body := lifecycle.NewCutBody(`{"redirect_uris":["https://app.example/cb"]}`)
 				r := httptest.NewRequest(http.MethodPost, issuer+"/register", body)
 				r.Header.Set("Content-Type", "application/json")
-				e.pinned(t, e.cutIn(t, end, r, body), lm, am, brokerCell{status: http.StatusBadRequest, body: "could not be read",
-					audit: []string{"client_registered failure"}})
+				e.endedAnswer(t, end, e.cutIn(t, end, r, body), lm, am)
 			})
 			for _, path := range []string{"/token", "/revoke"} {
 				t.Run(path, func(t *testing.T) {
 					e := newEnv(t)
 					lm, am := e.marks()
 					body := lifecycle.NewCutBody(url.Values{"client_id": {clientID}, "token": {"x"}, "grant_type": {"refresh_token"}}.Encode())
-					e.pinned(t, e.cutIn(t, end, formRequest(path, body), body), lm, am, brokerCell{status: http.StatusBadRequest, body: "invalid_request",
-						audit: []string{"token_rejected failure"}})
+					e.endedAnswer(t, end, e.cutIn(t, end, formRequest(path, body), body), lm, am)
 				})
 			}
 			t.Run("/consent", func(t *testing.T) {
@@ -168,23 +175,18 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				body := lifecycle.NewCutBody(url.Values{"flow": {p.flow}, "action": {"allow"}}.Encode())
 				r := formRequest("/consent", body)
 				r.AddCookie(p.binding)
-				e.pinned(t, e.cutIn(t, end, r, body), lm, am, brokerCell{status: http.StatusBadRequest, body: "could not be read"})
+				e.endedAnswer(t, end, e.cutIn(t, end, r, body), lm, am)
 			})
 		})
 
-		m[at(end.Ending, lifecycle.AwaitingHeaders)] = lifecycle.KnownResidual("#672", waitBug, func(t *testing.T) {
-			unavailablePage := brokerCell{status: http.StatusServiceUnavailable, body: "Try again", warns: []string{metadataUnavailable}}
-			unavailableToken := func(what string) brokerCell {
-				return brokerCell{status: http.StatusServiceUnavailable, body: what, warns: []string{metadataUnavailable},
-					audit: []string{"token_rejected failure"}}
-			}
+		m[at(end.Ending, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
 			t.Run("/authorize", func(t *testing.T) {
 				e, d, mode := cimdEnv(t)
 				mode.Store(modeWaits)
 				lm, am := e.marks()
 				q := authorizeQuery(url.Values{"client_id": {d.ClientID}, "redirect_uri": {d.Redirect}})
 				r := httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+q.Encode(), nil)
-				e.pinned(t, e.serveIn(endedCtx(end), r), lm, am, unavailablePage)
+				e.endedAnswer(t, end, e.serveIn(endedCtx(end), r), lm, am)
 			})
 			t.Run("/consent", func(t *testing.T) {
 				e, d, mode := cimdEnv(t)
@@ -194,50 +196,53 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				lm, am := e.marks()
 				r := formRequest("/consent", strings.NewReader(url.Values{"flow": {p.flow}, "action": {"allow"}}.Encode()))
 				r.AddCookie(p.binding)
-				e.pinned(t, e.serveIn(endedCtx(end), r), lm, am, unavailablePage)
+				e.endedAnswer(t, end, e.serveIn(endedCtx(end), r), lm, am)
 			})
 			t.Run("/token, a code", func(t *testing.T) {
 				e, d, mode := cimdEnv(t)
 				mode.Store(modeWaits)
 				lm, am := e.marks()
 				f := url.Values{"grant_type": {"authorization_code"}, "code": {"any"}, "client_id": {d.ClientID}, "redirect_uri": {d.Redirect}, "code_verifier": {verifier}}
-				e.pinned(t, e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode()))), lm, am,
-					unavailableToken("the client's metadata could not be fetched"))
+				e.endedAnswer(t, end, e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode()))), lm, am)
 			})
 			for name, tc := range map[string]struct {
 				mode int32
 				path string
-				what string
 			}{
-				"/token, a refresh":         {modeWaits, "/token", "the client's metadata could not be fetched"},
-				"/token, the client's keys": {modeKeysWait, "/token", "the client's keys could not be fetched"},
-				"/revoke":                   {modeWaits, "/revoke", "the client's metadata could not be fetched"},
+				"/token, a refresh":         {modeWaits, "/token"},
+				"/token, the client's keys": {modeKeysWait, "/token"},
+				"/token, the IdP's refresh": {modeOK, "/token"}, // the client resolves: the refresh waits on the IdP
+				"/revoke":                   {modeWaits, "/revoke"},
 			} {
 				t.Run(name, func(t *testing.T) {
 					e, d, mode, tokens := offlineCIMD(t)
 					mode.Store(tc.mode)
 					lm, am := e.marks()
+					ops := len(e.idpOps)
 					f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
-					e.pinned(t, e.serveIn(endedCtx(end), formRequest(tc.path, strings.NewReader(f.Encode()))), lm, am, unavailableToken(tc.what))
+					e.endedAnswer(t, end, e.serveIn(endedCtx(end), formRequest(tc.path, strings.NewReader(f.Encode()))), lm, am)
+					if tc.mode == modeOK && !slices.Contains(e.idpOps[ops:], OpRefresh+" unavailable") {
+						t.Errorf("IdP calls %q; want the refresh to have reached the IdP", e.idpOps[ops:])
+					}
 				})
 			}
-			// Before the lookup, the callback redeems the IdP's code: a request that ended there fails
-			// the sign-in as the IdP's error.
+			// The callback has spent its login before it redeems the IdP's code, so it finishes, its
+			// request ended or not: a shutdown's browser gets its sign-in; a browser that went away
+			// gets nothing, and no grant is made.
 			t.Run("/callback, the IdP's code exchange", func(t *testing.T) {
 				e, d, _ := cimdEnv(t)
 				cookie, cb := e.startLogin(t, url.Values{"client_id": {d.ClientID}, "redirect_uri": {d.Redirect}, "scope": {"mcp offline_access"}})
 				lm, am := e.marks()
 				r := httptest.NewRequest(http.MethodGet, issuer+"/callback/entra?"+cb.RawQuery, nil)
 				r.AddCookie(cookie)
-				e.pinned(t, e.serveIn(endedCtx(end), r), lm, am, brokerCell{status: http.StatusBadGateway, body: "Signing in failed",
-					warns: []string{"IdP sign-in failed"}, audit: []string{"login failure"}})
+				e.callbackFinished(t, end, e.serveIn(endedCtx(end), r), lm, am)
 			})
-			// After the IdP's code is spent, the callback looks the client up to grant offline_access:
-			// today a request that ends there logs the failed lookup and goes on, with a grant that
-			// cannot refresh.
+			// After the IdP's code is spent, the callback looks the client up to grant offline_access,
+			// on its own context: a request that ends meanwhile neither fails the lookup nor loses the
+			// refresh.
 			t.Run("/callback, the client lookup", func(t *testing.T) {
 				d := clientdocs.Load(t, "claude-ai")
-				lookups := &enteredLookups{entered: make(chan struct{})}
+				lookups := &enteredLookups{entered: make(chan struct{}), release: make(chan struct{})}
 				cimd := withCIMD(clientdocs.Serve(t, d))
 				e := newEnv(t, func(c *Config) { cimd(c); lookups.inner = c.Clients; c.Clients = lookups })
 				cookie, cb := e.startLogin(t, url.Values{"client_id": {d.ClientID}, "redirect_uri": {d.Redirect}, "scope": {"mcp offline_access"}})
@@ -255,14 +260,17 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					t.Fatal("the callback never looked the client up")
 				}
 				stop()
+				close(lookups.release)
 				var w *httptest.ResponseRecorder
 				select {
 				case w = <-got:
 				case <-time.After(5 * time.Second):
 					t.Fatal("the callback never answered")
 				}
-				e.pinned(t, w, lm, am, brokerCell{status: http.StatusFound,
-					warns: []string{"looking up the client failed, so this grant cannot refresh"}, audit: []string{"login success"}})
+				if err := lookups.ctxErr.Load(); err != nil {
+					t.Errorf("the lookup's context ended (%v); want it to outlive the request", *err)
+				}
+				e.callbackFinished(t, end, w, lm, am)
 			})
 		})
 	}
@@ -270,12 +278,14 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 }
 
 // enteredLookups resolves clients through inner until armed; then a CIMD lookup says it has
-// entered and waits for its request to end, as CIMDRegistry.Client does.
+// entered, waits for release, and resolves through inner, keeping its context's error.
 type enteredLookups struct {
 	inner   registration.Registry
 	armed   atomic.Bool
 	once    sync.Once
 	entered chan struct{}
+	release chan struct{}
+	ctxErr  atomic.Pointer[error]
 }
 
 func (l *enteredLookups) Client(ctx context.Context, id string) (registration.Client, error) {
@@ -283,6 +293,32 @@ func (l *enteredLookups) Client(ctx context.Context, id string) (registration.Cl
 		return l.inner.Client(ctx, id)
 	}
 	l.once.Do(func() { close(l.entered) })
-	<-ctx.Done()
-	return nil, fmt.Errorf("%w: %v", registration.ErrUnavailable, ctx.Err())
+	<-l.release
+	if err := ctx.Err(); err != nil {
+		l.ctxErr.Store(&err)
+	}
+	return l.inner.Client(ctx, id)
+}
+
+// callbackFinished fails t unless a callback whose request ended as end does finished as it should:
+// at shutdown, the browser's sign-in (a code, a grant that can refresh, the login audited); for a
+// browser that went away, nothing sent and no grant; neither logged as a failure.
+func (e *env) callbackFinished(t *testing.T, end lifecycle.Ended, w *httptest.ResponseRecorder, logMark, auditMark int) {
+	t.Helper()
+	if end.Ending == lifecycle.ClientGone {
+		e.endedAnswer(t, end, w, logMark, auditMark)
+		if g := firstGrant(e.st); g != "" {
+			t.Errorf("grant %s made for a browser that went away", g)
+		}
+		return
+	}
+	e.pinned(t, w, logMark, auditMark, brokerCell{status: http.StatusFound, audit: []string{"login success"}})
+	back, _ := url.Parse(w.Header().Get("Location"))
+	if back.Query().Get("code") == "" {
+		t.Fatalf("redirected to %q; want a code", back)
+	}
+	g, err := e.st.Grant(context.Background(), firstGrant(e.st))
+	if err != nil || !slices.Contains(g.Scopes, "offline_access") {
+		t.Errorf("grant %+v, %v; want one that can refresh", g, err)
+	}
 }

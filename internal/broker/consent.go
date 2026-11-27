@@ -11,6 +11,7 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/shutdown"
 )
 
 // Consent (ADR-0010). /authorize validates the request and shows the consent page; the page posts
@@ -154,6 +155,9 @@ func (b *Broker) readAnswer(w http.ResponseWriter, r *http.Request) (f flow, sea
 		b.page(w, r, http.StatusBadRequest, "This answer could not be read.", "Start again from your app.")
 	}
 	if err := r.ParseForm(); err != nil {
+		if shutdown.AnswerIfEnded(w, r) { // a request that ended as its body was read is answered by how it ended, and is no failed request (#672)
+			return f, "", false, false
+		}
 		unreadable()
 		return f, "", false, false
 	}

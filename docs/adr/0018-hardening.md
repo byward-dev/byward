@@ -1,6 +1,6 @@
 # ADR-0018: Hardening — Origin and Host checks, bounded HTTP, Rewrite-only proxying
 
-- Status: Accepted; amended 2026-11-06 (#102, #103, #105), 2026-11-07 (#167), 2026-11-14 (§13); amended by ADR-0032 (§1–2)
+- Status: Accepted; amended 2026-11-06 (#102, #103, #105), 2026-11-07 (#167), 2026-11-14 (§13), 2026-11-27 (§9, #672); amended by ADR-0032 (§1–2)
 - Date: 2026-11-06
 - Issue: #18 (F17)
 
@@ -119,3 +119,15 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
   Sources checked 2026-11-07; research notes kept outside the repository. The stdio bridge reads its headers
   from the header section only, so a trailer is never read as one there either. Response trailers from the
   upstream are a separate matter.
+
+## Amendment 2026-11-27 (a sign-in in flight at shutdown, #672)
+
+- **§9 failure handling:** a shutdown ends every request in flight through its context. An OAuth callback
+  that has spent its login is the exception: it finishes on its own context, bounded by
+  `broker.CallbackTimeout` (20 s), for its whole remainder: the IdP's code exchange, the access gate, the
+  client lookup, the grant and code, and the audit. Nothing can retry it. The login was spent before the IdP
+  was called (#150), and the IdP's authorization code is single-use and never re-posted
+  (`internal/idp/fetch.go`), so a callback cut short would make the user sign in again. The bound is below
+  the 25 s grace (`server.ShutdownTimeout`), which `http.Server.Shutdown` spends waiting for handlers still
+  running, so the store is still open when the callback ends. A test pins the order. A browser that went
+  away gets nothing and no grant: the callback checks for it after the IdP's answer and before the grant.

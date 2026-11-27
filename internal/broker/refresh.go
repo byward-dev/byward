@@ -10,6 +10,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -87,6 +88,9 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sealed, asserted, idpExpiry, e, ok := b.refreshIdP(r, g, now)
+	if !ok && e == requestEnded && shutdown.AnswerIfEnded(w, r) {
+		return
+	}
 	if !ok {
 		if sealed != nil {
 			b.keepIdPTokens(r, g.ID, sealed)
@@ -116,8 +120,13 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	b.issue(w, r, client.ID(), g.ID, g.Subject, asserted, idpExpiry, now, g.ExpiresAt, scopes, next)
 }
 
+// requestEnded is refreshIdP's error for a refresh whose request ended while it waited on the
+// IdP: there is nothing to send but the ending's own answer (shutdown.AnswerIfEnded).
+var requestEnded = tokenError{}
+
 // refreshIdP renews the grant's IdP tokens and re-checks the user (ADR-0006 §6, ADR-0012). It
-// returns the new sealed IdP tokens, or the error to send; when the IdP says the user must sign in
+// returns the new sealed IdP tokens, or the error to send (requestEnded for a refresh that waited
+// until its request ended); when the IdP says the user must sign in
 // again, or the identity no longer matches or passes the gate, the grant is revoked. When the gate
 // cannot decide, it returns the error together with the sealed new tokens, for the caller to keep.
 func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]byte, assertedClaims, time.Time, tokenError, bool) {
@@ -146,6 +155,10 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			// Log the IdP's error with the revocation: its code says why, and its trace and correlation
 			// IDs find the IdP's record (ADR-0021 §7).
 			return end("the IdP ended the session; grant revoked", append([]any{"error", err}, idpAttrs(err)...)...)
+		case errors.As(err, &ie) && ie.Class == idp.Unavailable && (shutdown.ShuttingDown(ctx) || shutdown.ClientWentAway(ctx)):
+			// The refresh waited until its request ended: no failure of the IdP's, and the caller
+			// answers by how the request ended (requestEnded, #672).
+			return nil, assertedClaims{}, time.Time{}, requestEnded, false
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
 			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, idpAttrs(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
@@ -203,6 +216,12 @@ func (b *Broker) sealIdPTokens(ctx context.Context, g store.Grant, t idp.Tokens,
 
 // keepIdPTokensTimeout bounds the detached store write in keepIdPTokens.
 const keepIdPTokensTimeout = 5 * time.Second
+
+// CallbackTimeout bounds a callback once it has spent its login: the IdP's code exchange and every
+// step after it run detached from the request, which cannot be retried (the login and the IdP's
+// code are both spent). It is below the server's shutdown grace, so a shutdown waits for it
+// (server.ShutdownTimeout, ADR-0018 §9).
+const CallbackTimeout = 20 * time.Second
 
 // keepIdPTokens stores the IdP's new tokens for a refresh that renewed them but failed afterwards,
 // so an IdP that revoked the old refresh token does not force a new sign-in (#92). It is best

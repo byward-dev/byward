@@ -19,6 +19,7 @@ import (
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -180,6 +181,9 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) loadClient(w http.ResponseWriter, r *http.Request, clientID, redirect string) (registration.Client, bool) {
 	ctx := r.Context()
 	client, err := b.cfg.Clients.Client(ctx, clientID)
+	if errors.Is(err, registration.ErrUnavailable) && shutdown.AnswerIfEnded(w, r) { // a lookup that waited until its request ended is answered by how it ended, and is no failed lookup (#672)
+		return nil, false
+	}
 	if errors.Is(err, registration.ErrStoreUnavailable) { // a DCR registration could not be read: the store, not the client
 		b.cfg.Log.ErrorContext(ctx, "loading a client registration failed", "error", err)
 		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
@@ -369,9 +373,21 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		b.serverError(w, r, spent)
 		return
 	}
+	// The login is spent, and the IdP's code is spent once sent: no request can finish this sign-in
+	// but this one. It finishes on its own context, bounded by CallbackTimeout, whether or not its
+	// request ends, so a shutdown loses no sign-in (#672). A browser that went away is sent nothing
+	// and gets no grant: gone checks the request it came with.
+	r0 := r
+	finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), CallbackTimeout)
+	defer cancel()
+	r, ctx = r.WithContext(finish), finish
+	gone := func() bool { return shutdown.ClientWentAway(r0.Context()) && shutdown.AnswerIfEnded(w, r0) }
 	start := time.Now()
 	id, toks, err := b.cfg.IdP.Callback(ctx, q, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
 	b.observeIdP(ctx, OpCallback, start, err)
+	if gone() {
+		return
+	}
 	if err != nil {
 		if l.Silent {
 			b.refuseSilentIdPFailure(w, r, l, err)
@@ -429,6 +445,9 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	sealedTokens, err := b.cfg.IdPTokenBox.Seal(marshalSecrets(toks, b.cfg.Assert.claimsOf(id)), now.Add(GrantLifetime))
 	if err != nil {
 		failed(err)
+		return
+	}
+	if gone() {
 		return
 	}
 	g, err := b.cfg.Store.CreateGrant(ctx, store.Grant{ID: randomID(), ClientID: l.ClientID, Subject: id.Subject, Issuer: id.Issuer,

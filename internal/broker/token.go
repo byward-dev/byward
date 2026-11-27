@@ -20,6 +20,7 @@ import (
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -51,6 +52,9 @@ func (b *Broker) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
+		if shutdown.AnswerIfEnded(w, r) { // a request that ended as its body was read is answered by how it ended, and is no failed request (#672)
+			return
+		}
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_request", "the request body is not a valid form"})
 		return
 	}
@@ -99,6 +103,9 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 			b.unavailable(w, r, "loading a client registration failed", err)
 			return nil, false
 		}
+		if errors.Is(err, registration.ErrUnavailable) && shutdown.AnswerIfEnded(w, r) { // a lookup that waited until its request ended is answered by how it ended, and is no failed lookup (#672)
+			return nil, false
+		}
 		b.clientLookupFailed(ctx, clientID, nil, err)
 		if errors.Is(err, registration.ErrUnavailable) { // draft -03 §6.1: 503 for a transient failure
 			w.Header().Set("Retry-After", cimdRetryAfter)
@@ -117,6 +124,9 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 			return nil, false
 		}
 		if errors.Is(err, registration.ErrUnavailable) { // the client's jwks_uri could not be fetched for now
+			if shutdown.AnswerIfEnded(w, r) { // its fetch waited until the request ended (#672)
+				return nil, false
+			}
 			b.clientLookupFailed(ctx, clientID, client, err)
 			w.Header().Set("Retry-After", cimdRetryAfter)
 			b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the client's keys could not be fetched"})
