@@ -202,7 +202,9 @@ standard variables, e.g. `OTEL_TRACES_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOI
 
 One JSON line per request: `request_id`, `method`, `path` (never the query string), `status`, `duration_ms`,
 `remote_ip`, and the `Mcp-Method` header value as `mcp_method`. Attribute keys are allowlisted; whole header maps,
-bodies, tokens and secrets are never logged, and bearer-shaped values are redacted.
+bodies, tokens and secrets are never logged, and a value shaped like a credential is redacted as a
+whole: a Bearer or Basic credential, a JWT, a GitHub or Slack token, or a connection string with a
+password.
 
 A request to the upstream whose client went away before its answer started records `status` 499, nginx's "client closed
 request": one relayed to an HTTP upstream, one sent to a stdio upstream process, one whose body the stdio bridge was

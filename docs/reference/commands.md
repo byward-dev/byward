@@ -169,7 +169,9 @@ byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url
 Prints a shell script; byward runs none of it, calls no API and never sees the client secret.
 `--public-url` and `--upstream-url` default to `BYWARD_PUBLIC_URL` and `BYWARD_UPSTREAM_URL`, and init
 checks both as the proxy checks those settings: a URL the proxy would refuse exits 2 before any script
-is printed, and a password in it is never shown. Review
+is printed, and a password in it is never shown. A URL whose text, as the script would print it, holds
+a secret's kind (a GitHub or Slack token, a connection string with a password, a JWT) is refused the
+same way, the query of `--upstream-url` included, since the script prints that URL whole. Review
 the script, then run it with the Azure CLI signed in to the tenant (`az login --tenant <tenant-id>`;
 the script stops if `az` is signed in elsewhere). It follows
 [the Entra quickstart](../how-to/quickstart-entra.md) step 1 and adds what app-only callers need

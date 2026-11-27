@@ -223,7 +223,9 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
       set retention accordingly. Email and name are never logged.
 - [ ] No token, secret, authorization code or PKCE verifier is logged.
       - Attribute keys are allowlisted.
-      - Bearer- and JWT-shaped values are redacted.
+      - Bearer- and JWT-shaped values are redacted, and so is every kind of secret config refuses in a
+        setting that is not secret (a GitHub or Slack token, a connection string with a password), in
+        a stdio upstream's stderr lines too.
       - Request lines carry the path without the query string.
       - The startup log prints every effective setting with secrets as `<redacted>`.
 - [ ] Alert on at least these:
