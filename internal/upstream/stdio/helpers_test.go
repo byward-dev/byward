@@ -215,6 +215,13 @@ func (r *recorder) WithAttrs(as []slog.Attr) slog.Handler {
 
 func (r *recorder) WithGroup(string) slog.Handler { return r }
 
+// setAside forgets every record so far, so a test sees only what comes after.
+func (r *recorder) setAside() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	*r.recs = (*r.recs)[:0]
+}
+
 // warnings returns the records at WARN or above.
 func (r *recorder) warnings() []record {
 	r.mu.Lock()

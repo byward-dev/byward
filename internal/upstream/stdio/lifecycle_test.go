@@ -29,7 +29,6 @@ type stdioCell struct {
 	warns  []string // every WARN or ERROR line, by message, in any order, but a crash's
 	alive  bool     // the cell's process outlives the request, with its MCP session (legacy) or userConn (modern)
 	crash  bool     // the cell's process is killed: its exit is logged once, as unexpected, at WARN, and nothing stops it
-
 }
 
 // stdioRig is one bridge serving through logging.Middleware, as the server does, so a cell sees the
@@ -393,11 +392,19 @@ func legacyInitializeMatrix() map[lifecycle.Cell]lifecycle.Case {
 	unreachableColumns(m)
 	for _, end := range []lifecycle.Ending{lifecycle.ClientGone, lifecycle.Shutdown} {
 		m[at(end, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
-			r := newStdioRig(t, nil)
-			ctx, stop := endedAs(end).Start(context.Background())
-			stop()
-			w, done := r.start(ctx, http.MethodPost, "", strings.NewReader(initialize))
-			r.check(t, w, done, endedCell(end, false))
+			for name, body := range map[string]string{
+				"an initialize": initialize,
+				// not legacyFallback's 400: a legacy request with no MCP session is told to initialize
+				"a request without an MCP session": `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+			} {
+				t.Run(name, func(t *testing.T) {
+					r := newStdioRig(t, nil)
+					ctx, stop := endedAs(end).Start(context.Background())
+					stop()
+					w, done := r.start(ctx, http.MethodPost, "", strings.NewReader(body))
+					r.check(t, w, done, endedCell(end, false))
+				})
+			}
 		})
 		m[at(end, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 			t.Run("its body is read", func(t *testing.T) {
@@ -484,9 +491,7 @@ func legacyInitializeMatrix() map[lifecycle.Cell]lifecycle.Case {
 func (r *stdioRig) session(t *testing.T) string {
 	t.Helper()
 	sid := r.initialize(t, "alice")
-	r.log.mu.Lock()
-	*r.log.recs = (*r.log.recs)[:0]
-	r.log.mu.Unlock()
+	r.log.setAside()
 	return sid
 }
 
@@ -672,9 +677,7 @@ func (r *stdioRig) warm(t *testing.T) {
 		t.Fatalf("first modern request: status %d", res.StatusCode)
 	}
 	readEvents(t, res)
-	r.log.mu.Lock()
-	*r.log.recs = (*r.log.recs)[:0]
-	r.log.mu.Unlock()
+	r.log.setAside()
 }
 
 // cancelledUpstream waits until the upstream has seen the cell's request cancelled.
@@ -693,22 +696,23 @@ func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 	bigEcho := modernBody(`1`, "echo", "", `"pad":"`+strings.Repeat("a", 512<<10)+`"`)
 	for _, end := range []lifecycle.Ending{lifecycle.ClientGone, lifecycle.Shutdown} {
 		m[at(end, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
-			t.Run("its process not yet started", func(t *testing.T) {
+			t.Run("the upstream's era not yet known", func(t *testing.T) {
 				r := newModernRig(t, nil, "-modern")
 				ctx, stop := endedAs(end).Start(context.Background())
 				stop()
 				w, done := r.modernStart(ctx, echo)
 				r.check(t, w, done, endedCell(end, false))
 			})
-			t.Run("the upstream already known legacy", func(t *testing.T) { // not legacyFallback's 400 (modernPost's cached verdict)
+			t.Run("the upstream already known to be legacy", func(t *testing.T) { // not legacyFallback's 400 (modernPost's cached verdict)
 				r := newModernRig(t, nil, "-mcp")
 				if res := r.modern(t, "alice", echo); res.StatusCode != http.StatusBadRequest {
 					t.Fatalf("the first modern request to a legacy upstream: status %d, want 400", res.StatusCode)
 				}
 				eventually(t, "the legacy process to stop", func() bool { return r.held() == held{} })
-				r.log.mu.Lock() // set aside, as session's is, so the cell sees only its own
-				*r.log.recs = (*r.log.recs)[:0]
-				r.log.mu.Unlock()
+				if !r.bridge.cap.legacy() {
+					t.Fatal("the legacy verdict was not kept: the cell would not reach modernPost's cached verdict")
+				}
+				r.log.setAside()
 				ctx, stop := endedAs(end).Start(context.Background())
 				stop()
 				w, done := r.modernStart(ctx, echo)
@@ -744,6 +748,9 @@ func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 				r.end(end, stop)
 				r.signal(t, syscall.SIGUSR1)
 				r.check(t, w, done, endedCell(end, false))
+				if n := r.stops("not_modern"); n != 1 {
+					t.Errorf("%d not_modern stops; want the legacy process stopped once", n)
+				}
 			})
 		})
 		m[at(end, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) { // cancelled upstream too

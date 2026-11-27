@@ -259,10 +259,7 @@ type modernRequest struct {
 // modernPost serves one session-less modern-era POST; meta is the message's, already read.
 func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity, msg []byte, env envelope, meta requestMeta) {
 	if b.cap.legacy() {
-		if shutdown.AnswerIfEnded(w, r) { // it ended while its body was read (#672)
-			return
-		}
-		legacyFallback(w)
+		legacyFallback(w, r)
 		return
 	}
 	switch env.kind() {
@@ -304,13 +301,8 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 		upstreamFailed(w, r, c.log, relayFailed, err)
 		return
 	}
-	if !modern {
-		// The probe runs on its own context, its verdict shared, so a request that ended meanwhile
-		// is answered by how it ended, not as a modern request to a legacy upstream (#672).
-		if shutdown.AnswerIfEnded(w, r) {
-			return
-		}
-		legacyFallback(w)
+	if !modern { // the probe runs on its own context, its verdict shared: the request may have ended meanwhile
+		legacyFallback(w, r)
 		return
 	}
 	if env.kind() == kindNotification {
@@ -329,8 +321,12 @@ func userProcessKey(id Identity) string { return "user:" + id.user() }
 
 // legacyFallback is the answer to a modern request the upstream cannot serve: no modern error
 // code, so a dual-era client falls back to initialize (2026-07-28 transports, backwards
-// compatibility).
-func legacyFallback(w http.ResponseWriter) {
+// compatibility). A request that ended first, as its body was read or as the era probe ran, is
+// answered by how it ended instead (shutdown.AnswerIfEnded, #672).
+func legacyFallback(w http.ResponseWriter, r *http.Request) {
+	if shutdown.AnswerIfEnded(w, r) {
+		return
+	}
 	writeRPCError(w, nil, codeInvalidRequest,
 		"Bad Request: this server speaks MCP 2025-11-25; start a session with initialize")
 }

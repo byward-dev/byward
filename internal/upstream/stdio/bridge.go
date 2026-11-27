@@ -148,7 +148,7 @@ func (b *Bridge) post(w http.ResponseWriter, r *http.Request, id Identity, key s
 	}
 	if key == "" {
 		if env.Method != "initialize" || env.kind() != kindRequest {
-			legacyFallback(w)
+			legacyFallback(w, r)
 			return
 		}
 		if s, release = b.start(w, r, id); s == nil {
