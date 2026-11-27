@@ -409,3 +409,17 @@ func TestNoDocumentedExampleLooksLikeASecret(t *testing.T) {
 		t.Fatalf("%d documented examples found, want them all (160 today)", n)
 	}
 }
+
+// CheckShown refuses a command's shown text as Load refuses a setting's: the variable, the kind and
+// the length, never the value; text with no kind passes (#641).
+func TestCheckShownRefusesAShownSecretAsLoadDoes(t *testing.T) {
+	shown := "https://up.example/mcp?key=" + fakeToken("ghp_")
+	if err := CheckShown("upstream-url", shown); !isConfigError(err) || err.Error() != kindRefusal("BYWARD_UPSTREAM_URL", shown, "a GitHub token") {
+		t.Errorf("CheckShown = %v\nwant %s", err, kindRefusal("BYWARD_UPSTREAM_URL", shown, "a GitHub token"))
+	}
+	for _, shown := range []string{"https://up.example/mcp?team=ghp-docs", ""} {
+		if err := CheckShown("upstream-url", shown); err != nil {
+			t.Errorf("CheckShown(%q) = %v, want nil", shown, err)
+		}
+	}
+}

@@ -400,6 +400,36 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 	}
 }
 
+// byward init refuses a URL whose text, as the script would print it, holds a secret's kind, as config
+// refuses one in a setting that is not secret: naming the flag or variable and the kind, never the
+// value (#641). The script prints --upstream-url whole, so a token in its query is refused too.
+func TestInitRefusesAURLItWouldPrintWithASecretInIt(t *testing.T) {
+	ghp := "ghp_" + strings.Repeat("Q7", 18)
+	jwt := "eyJ" + "hbGciOiJFUzI1NiJ9" + "." + "eyJ" + "zdWIiOiJ4In0" + "." + "sig"
+	for _, tc := range []struct {
+		name, variable, kind string
+		args, env            []string
+	}{
+		{"--public-url, a token in its path", "BYWARD_PUBLIC_URL", "a GitHub token", []string{"--public-url", "https://m.example/" + ghp + "/mcp"}, nil},
+		{"--upstream-url, a token in its query", "BYWARD_UPSTREAM_URL", "a GitHub token", []string{"--public-url", "https://m.example/mcp", "--upstream-url", "https://up.example/mcp?key=" + ghp}, nil},
+		{"--upstream-url, a JWT in its path", "BYWARD_UPSTREAM_URL", "a JWT", []string{"--public-url", "https://m.example/mcp", "--upstream-url", "https://up.example/" + jwt}, nil},
+		{"BYWARD_UPSTREAM_URL, a token in its query", "BYWARD_UPSTREAM_URL", "a GitHub token", []string{"--public-url", "https://m.example/mcp"}, []string{"BYWARD_UPSTREAM_URL=https://up.example/mcp?key=" + ghp}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runWith(append([]string{"init", "entra", "--tenant", tenant}, tc.args...), tc.env...)
+			if code != exitConfig || stdout != "" || !strings.HasPrefix(stderr, "byward: init: "+tc.variable+": ") || !strings.Contains(stderr, "it looks like "+tc.kind) {
+				t.Errorf("exit %d, stdout %q, stderr %q; want exit %d refusing %s as %s", code, stdout, stderr, exitConfig, tc.variable, tc.kind)
+			}
+			if strings.Contains(stderr, "Q7Q7") || strings.Contains(stderr, "zdWIi") {
+				t.Errorf("stderr %q shows the value given", stderr)
+			}
+		})
+	}
+	if code, stdout, _ := runWith([]string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--upstream-url", "https://up.example/mcp?team=ghp-docs"}); code != exitOK || !strings.Contains(stdout, "team=ghp-docs") {
+		t.Errorf("exit %d; want a URL with no secret's kind printed in the script", code)
+	}
+}
+
 // revoke-user shows no key it was given: under Entra, a token pasted where the user key belongs is
 // refused (it is no tid:oid), and named by its length, as init names a value it refuses (#594, ADR-0031 §1). Every form of a secret,
 // and a token's three segments, is given as the key; each must reach the refusal and show nothing.
