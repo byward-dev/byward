@@ -24,7 +24,7 @@ func parseSecretKinds(v *Values) []error {
 			kind = logging.ShownSecretKind(val.Display())
 		}
 		if kind != "" {
-			errs = append(errs, secretKindRefusal(val, kind))
+			errs = append(errs, secretKindRefusal(val, val.Given.raw(), kind))
 		}
 	}
 	return errs
@@ -40,10 +40,11 @@ func CheckShown(name, shown string) error {
 	if kind == "" {
 		return nil
 	}
-	return secretKindRefusal(Value{Setting: lookup(name), Given: NewOpaque(shown), Source: SourceEnv}, kind)
+	return secretKindRefusal(Value{Setting: lookup(name), Source: SourceEnv}, shown, kind)
 }
 
-// secretKindRefusal is the refusal of val, whose value shows a secret of kind (#495).
-func secretKindRefusal(val Value, kind string) error {
-	return refusedForm(val, whole, val.Given.raw(), "a value that is not a secret (give a secret only in a secret setting's file)", "it looks like "+kind)
+// secretKindRefusal is the refusal of val, whose text raw shows a secret of kind (#495): by raw's
+// length only, as every refusal names a value.
+func secretKindRefusal(val Value, raw, kind string) error {
+	return refusedForm(val, whole, raw, "a value that is not a secret (give a secret only in a secret setting's file)", "it looks like "+kind)
 }
