@@ -28,10 +28,8 @@ type stdioCell struct {
 	closes bool     // the answer closes its connection
 	warns  []string // every WARN or ERROR line, by message, in any order, but a crash's
 	alive  bool     // the cell's process outlives the request, with its MCP session (legacy) or userConn (modern)
-	// crash is a cell whose process is killed. Its exit is logged as unexpected, at WARN, unless
-	// its stdout's end reached the bridge first: then it is logged as a stop for stdout_closed, at
-	// INFO (crashLogged).
-	crash bool
+	crash  bool     // the cell's process is killed: its exit is logged once, as unexpected, at WARN, and nothing stops it
+
 }
 
 // stdioRig is one bridge serving through logging.Middleware, as the server does, so a cell sees the
@@ -223,22 +221,14 @@ func (r *stdioRig) check(t *testing.T, w *brokenWriter, done <-chan struct{}, wa
 	}
 }
 
-// crashLogged fails t unless the killed process's exit was logged once: as an unexpected exit,
-// or, when its stdout's end reached the bridge before the exit was reaped, as a stop for
-// stdout_closed and an expected exit. Which one is a race today: the cells are KnownResidual("#672")
-// (crashRace) until the fix logs both as unexpected.
+// crashLogged fails t unless the killed process's exit was logged once, as unexpected, and no stop:
+// a crashed process is reaped before the stdout_closed stop's grace (process.go) runs out.
 func (r *stdioRig) crashLogged(t *testing.T) {
 	t.Helper()
 	eventually(t, "the process's exit to be logged", func() bool {
 		return len(r.log.with(exited))+len(r.log.with("upstream process exited")) == 1
 	})
-	if len(r.log.with(exited)) == 1 {
-		r.log.wantLoggedAsCrash(t)
-		return
-	}
-	if stops := r.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "stdout_closed" {
-		t.Errorf("the killed process's exit was logged as expected, with stops %v; want it logged as unexpected, or stopped for stdout_closed", stops)
-	}
+	r.log.wantLoggedAsCrash(t)
 }
 
 // stopping reports whether a process byward is stopping has not exited yet.
@@ -370,7 +360,6 @@ const (
 	noWriteBound     = "the only bound on a started stream is writeTimeout, 30 s of real time through SetWriteDeadline (sse.go), which the fake clock does not reach; a write that fails is the client-gone cell (TestAStdioStreamEndedByItsRequestIsRecordedAsCutOff, keep-alive row), and sse_test.go pins the deadline"
 	noAnswerBound    = "nothing bounds the wait for the process's answer: a held lease stops the idle timer (Process.hold), and a request lease is never evicted; the client leaving or a shutdown ends the wait"
 	noBodyBound      = "the bridge sets no bound on reading or sending a request: Send waits on its request alone, and the server's ReadTimeout bounds a stalled body"
-	crashRace        = "a killed process's exit is logged as unexpected, at WARN, only if it is reaped before the bridge reads its stdout's end; else the bridge stops it for stdout_closed and its exit is logged at INFO (process.go wait), so an operator loses a crash's warning; the cell accepts either until the fix makes it strict"
 	probeBug         = "a modern request whose MCP client goes away, or the proxy shuts down, while the server/discover probe is out waits for the probe's answer (it runs on its own context, as its verdict is shared), and if the upstream proves legacy is answered 400 legacyFallback (modern.go modernPost), not by how it ended"
 	bodyReadBug      = "a request whose MCP client goes away, or the proxy shuts down, while the bridge reads its body is answered 400 \"cannot read the request body\" (bridge.go post), not by how it ended (shutdown.AnswerIfEnded): 499, or 503 and close"
 )
@@ -454,7 +443,7 @@ func legacyInitializeMatrix() map[lifecycle.Cell]lifecycle.Case {
 		_ = pw.Close()
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"protocolVersion"`, alive: true})
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil, "-init=block")
 		r.stdinFull(t, lifecycle.UpstreamGone, "", bigInitialize, func() {}, func() {},
 			stdioCell{status: http.StatusBadGateway, body: unavailable, warns: []string{initFailed}, crash: true})
@@ -467,7 +456,7 @@ func legacyInitializeMatrix() map[lifecycle.Cell]lifecycle.Case {
 		r.signal(t, syscall.SIGUSR1)
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"protocolVersion"`, alive: true})
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.AwaitingHeaders)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil, "-init=hold")
 		w, done := r.start(context.Background(), http.MethodPost, "", strings.NewReader(initialize))
 		r.saidOnStderr(t, "holding initialize")
@@ -482,7 +471,7 @@ func legacyInitializeMatrix() map[lifecycle.Cell]lifecycle.Case {
 		r.signal(t, syscall.SIGUSR1)
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"protocolVersion"`, alive: true})
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil, "-init=lognhold")
 		w, done := r.start(context.Background(), http.MethodPost, "", strings.NewReader(initialize))
 		eventually(t, "the notification", func() bool { return strings.Contains(w.written(), "notifications/message") })
@@ -550,7 +539,7 @@ func legacyRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 			r.check(t, w, done, cutCell(end, true))
 		})
 	}
-	m[at(lifecycle.UpstreamGone, lifecycle.NotStarted)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
 		sid := r.session(t)
 		r.crashed(t)
@@ -566,7 +555,7 @@ func legacyRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 		_ = pw.Close()
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"id":2`, alive: true})
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
 		sid := r.session(t)
 		r.stdinFull(t, lifecycle.UpstreamGone, sid, bigRequest, func() { r.signal(t, syscall.SIGSTOP) }, func() {}, sessionGoneCell)
@@ -587,7 +576,7 @@ func legacyRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 		}
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"released"`, alive: true})
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
 		sid := r.session(t)
 		w, done := r.start(context.Background(), http.MethodPost, sid, strings.NewReader(holdBody))
@@ -626,7 +615,7 @@ func legacyGETMatrix() map[lifecycle.Cell]lifecycle.Case {
 			r.check(t, w, done, cutCell(end, true))
 		})
 	}
-	m[at(lifecycle.UpstreamGone, lifecycle.NotStarted)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
 		sid := r.session(t)
 		r.crashed(t)
@@ -644,7 +633,7 @@ func legacyGETMatrix() map[lifecycle.Cell]lifecycle.Case {
 	})
 	// The crash is logged by the process (exited); the GET carries no answer to cut, so it ends as
 	// a DELETE's does, with no error_type.
-	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
 		sid := r.session(t)
 		w, done := r.start(context.Background(), http.MethodGet, sid, http.NoBody)
@@ -768,7 +757,7 @@ func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 		_ = pw.Close()
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"lifecycle"`, alive: true})
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newModernRig(t, nil, "-modern")
 		r.warm(t)
 		r.stdinFull(t, lifecycle.UpstreamGone, "", bigEcho, func() { r.signal(t, syscall.SIGSTOP) }, func() {},
@@ -782,7 +771,7 @@ func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 		r.signal(t, syscall.SIGUSR1)
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"lifecycle"`, alive: true})
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.AwaitingHeaders)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newModernRig(t, nil, "-exitondiscover", "-modern")
 		w, done := r.modernStart(context.Background(), echo)
 		r.check(t, w, done, stdioCell{status: http.StatusBadGateway, body: unavailable, warns: []string{relayFailed}, crash: true})
@@ -805,7 +794,7 @@ func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 		readEvents(t, r.modern(t, "alice", modernBody(`"r"`, "release", "", "")))
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"released"`, alive: true})
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newModernRig(t, nil, "-modern")
 		w, done := r.modernStart(context.Background(), hold)
 		eventually(t, "the stream to start", w.hasStarted)
@@ -859,7 +848,7 @@ func modernListenMatrix() map[lifecycle.Cell]lifecycle.Case {
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: completeResult, alive: true})
 		r.cancelledUpstream(t)
 	})
-	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newModernRig(t, nil, "-modern")
 		w, done := open(t, r, context.Background())
 		r.signal(t, syscall.SIGKILL)

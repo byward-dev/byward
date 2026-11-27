@@ -4,6 +4,7 @@ package stdio
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -261,6 +262,7 @@ func TestOnlyAProbeTheProcessAnswersOrLetsTimeOutDecidesTheUpstreamsEra(t *testi
 		command      []string
 		prepare      func(*testing.T, *bridgeHarness) // before the bridge probes alice's process
 		probeTimeout time.Duration                    // longer than guard where the probe is answered, so an unanswered one fails the row
+		bound        time.Duration                    // how long each request may take, if not guard: 100 times a probeTimeout it waits out
 		alice        int                              // the status of each of alice's requests
 		stopReasons  []string                         // logged, once bob has been answered too: a kept verdict answers him without a probe
 		bob          int                              // the next user's status
@@ -278,7 +280,9 @@ func TestOnlyAProbeTheProcessAnswersOrLetsTimeOutDecidesTheUpstreamsEra(t *testi
 		// The same code path as Method not found: it pins that any error answer is a verdict.
 		{name: "answered Invalid request parameters, as the Python SDK does", command: []string{fakeBin, "-mcp", "-invaliddiscover"}, probeTimeout: time.Minute,
 			alice: http.StatusBadRequest, stopReasons: []string{"not_modern"}, bob: http.StatusBadRequest},
-		{name: "not answered in time", command: []string{fakeBin, "-mcp", "-silentdiscover"}, probeTimeout: 50 * time.Millisecond,
+		// The timeout also covers sending the probe: one that runs out first is no verdict, a 502, so
+		// it is 500 ms, which a stalled machine does not spend before the send (#672).
+		{name: "not answered in time", command: []string{fakeBin, "-mcp", "-silentdiscover"}, probeTimeout: 500 * time.Millisecond, bound: 50 * time.Second,
 			alice: http.StatusBadRequest, stopReasons: []string{"not_modern"}, bob: http.StatusBadRequest},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -290,7 +294,7 @@ func TestOnlyAProbeTheProcessAnswersOrLetsTimeOutDecidesTheUpstreamsEra(t *testi
 				c.prepare(t, b)
 			}
 			status := func(user string) int { // bounded: a request that waits on a stopping process fails the row, not the package
-				ctx, cancel := context.WithTimeout(context.Background(), guard)
+				ctx, cancel := context.WithTimeout(context.Background(), cmp.Or(c.bound, guard))
 				defer cancel()
 				res := b.modernCtx(t, ctx, user, modernBody(`1`, "echo", "", ""))
 				_, _ = io.Copy(io.Discard, res.Body)
