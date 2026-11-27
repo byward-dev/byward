@@ -204,10 +204,8 @@ func (r *stdioRig) crashLogged(t *testing.T) {
 	eventually(t, "the process's exit to be logged", func() bool {
 		return len(r.log.with(exited))+len(r.log.with("upstream process exited")) == 1
 	})
-	if exits := r.log.with(exited); len(exits) == 1 {
-		if exits[0].level != slog.LevelWarn {
-			t.Errorf("the killed process's exit was logged at %v; want WARN", exits[0].level)
-		}
+	if len(r.log.with(exited)) == 1 {
+		r.log.wantLoggedAsCrash(t)
 		return
 	}
 	if stops := r.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "stdout_closed" {
@@ -294,6 +292,7 @@ func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string)
 	select {
 	case <-read:
 	case <-done:
+		_ = pw.Close()
 		t.Fatalf("the bridge answered %q before it read the request body", w.written())
 	case <-time.After(guard):
 		_ = pw.Close()
