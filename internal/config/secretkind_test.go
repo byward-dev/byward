@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // fakeToken is a token of prefix's form, made here so no file holds one whole: a secret scanner
@@ -21,7 +23,8 @@ func fakeJWT() string {
 	return "eyJ" + "hbGciOiJFUzI1NiJ9" + "." + "eyJ" + "zdWIiOiJ4In0" + "." + "sig"
 }
 
-// secretKinds are a value of each kind secretKind names, with the class a refusal says.
+// secretKinds are a value of each kind the catalogue names (logging.ShownSecretKind), with the class a
+// refusal says; logging's own copy pins the catalogue's rules (internal/logging/secretkind_test.go).
 var secretKinds = []struct{ value, class string }{
 	{fakeToken("ghp_"), "a GitHub token"},
 	{fakeToken("github_pat_"), "a GitHub token"},
@@ -105,34 +108,6 @@ func TestEverySettingThatShowsASecretIsRefusedTogether(t *testing.T) {
 	want := kindRefusal("BYWARD_RESOURCE_NAME", tok, "a GitHub token") + "; " + kindRefusal("BYWARD_OPERATOR_NAME", tok, "a GitHub token")
 	if !isConfigError(err) || err.Error() != want {
 		t.Fatalf("%v\nwant %s", err, want)
-	}
-}
-
-// secretKind names each kind, and nothing else: a prefix named in prose, with too few token
-// characters after it, inside a word, split from its tail by a space or tab, or followed by _
-// rather than a letter or digit, is no token; a URL with a user but no password, or an empty one,
-// a / before what looks like a password, a key=value that is not a password, and a key that only
-// starts or ends with "password" are no connection string.
-func TestSecretKindNamesOnlyTheKindsItLists(t *testing.T) {
-	for _, k := range secretKinds {
-		if got := secretKind(k.value); got != k.class {
-			t.Errorf("secretKind(<%s>) = %q, want %q", k.class, got, k.class)
-		}
-	}
-	for _, s := range []string{"ghp_", "xoxb-", "ghp_ tokens", "ghp_short", "xoxb-style", "ghp_" + strings.Repeat("Q", 9),
-		"ghp__" + strings.Repeat("Q", 10), "app-" + fakeToken("ghp_"), "my.xoxb-" + strings.Repeat("Q", 10),
-		"team_ghs_" + strings.Repeat("Q", 10), "a" + fakeToken("ghp_"), "1" + fakeToken("ghp_"), "MCP.User", "byward-users",
-		"/byward-users", "https://app.example/client.json", "postgres://db.example/app", "postgres://app@db.example/app",
-		"user@example.com", "Server=db;Database=app", "a=b", "OldPassword=x", "passwords=many", "00000000-0000-0000-0000-000000000000",
-		"A" + fakeToken("ghp_"), "ghp_\t" + strings.Repeat("Q7", 18), "https://h.example/a:b@c", "https://h.example:8080/pkg@1.0",
-		"postgres://app:@db.example/app", "a+password=b",
-		"docs at https://docs.example: ask ops@example.com",        // a space ends a URL's password
-		"docs at https://docs.example see ops:on-call@example.com", // and its user name
-		"https://ops@a.example:8443,ops@example.com",               // an @ ends a URL's user name
-		"smtp://ops:@mail.example,ops@example.com"} {               // and its password
-		if got := secretKind(s); got != "" {
-			t.Errorf("secretKind(%q) = %q, want none", s, got)
-		}
 	}
 }
 
@@ -260,7 +235,7 @@ func TestAListWithTwoSecretsIsRefusedOnce(t *testing.T) {
 // urlPassword in any other setting (TestWhatAShapeShowsIsWhatIsChecked), never joins two entries
 // into one user part. A list whose entries refuse an @ refuses it by its own rule. A connection
 // string whose password a comma split is refused all the same, as the list shows it whole
-// (splitPassword): an entry scheme://X:Y, Y no port, then an @ before any / in a later entry.
+// (logging.ShownListSecretKind): an entry scheme://X:Y, Y no port, then an @ before any / in a later entry.
 func TestAListWithAnAtInALaterEntryLoads(t *testing.T) {
 	appOn := append(slices.Clone(base), "BYWARD_APP_TOKENS=entra")
 	for _, tc := range []struct {
@@ -421,7 +396,7 @@ func TestNoDocumentedExampleLooksLikeASecret(t *testing.T) {
 				continue // a secret's, an unknown name, a placeholder, or another setting's name
 			}
 			n++
-			if k := shownKind(s.shape.display(value)); k != "" {
+			if k := logging.ShownSecretKind(s.shape.display(value)); k != "" {
 				t.Errorf("%s: %s=%q looks like %s", p, m[1], value, k)
 			}
 		}

@@ -3,7 +3,8 @@
 // every non-printable rune escaped (#690). It also holds how logs and error messages may show what
 // can carry a secret: URL (and MarkedURL for a URL setting) for a URL, Hidden for an operator's
 // value, NotShown for a refused value, by its length only, and FileError for a file's error, never
-// its path. And it observes each request for the request line, the request metric and the server
+// its path; and the catalogue of secret kinds a value that is not a secret must never show
+// (ShownSecretKind, ShownListSecretKind). And it observes each request for the request line, the request metric and the server
 // span: the status it sent and, for a response cut off after its headers, why (Observe, CutOff).
 package logging
 
