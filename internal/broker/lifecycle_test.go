@@ -16,6 +16,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
@@ -237,6 +238,24 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				r.AddCookie(cookie)
 				e.callbackFinished(t, end, e.serveIn(endedCtx(end), r), lm, am)
 			})
+			// The IdP refuses the code exchange: a browser that went away is still sent nothing, and
+			// no failure is logged or audited for it; a shutdown's browser, still there, is told the
+			// sign-in failed, as any live one is.
+			t.Run("/callback, a failed code exchange", func(t *testing.T) {
+				e, d, _ := cimdEnv(t)
+				cookie, cb := e.startLogin(t, url.Values{"client_id": {d.ClientID}, "redirect_uri": {d.Redirect}, "scope": {"mcp offline_access"}})
+				f := fakeidp.CodeExpired
+				e.fake.Set(fakeidp.FailToken(fakeidp.GrantAuthorizationCode, &f))
+				lm, am := e.marks()
+				r := httptest.NewRequest(http.MethodGet, issuer+"/callback/entra?"+cb.RawQuery, nil)
+				r.AddCookie(cookie)
+				w := e.serveIn(endedCtx(end), r)
+				if end.Ending == lifecycle.ClientGone {
+					e.endedAnswer(t, end, w, lm, am)
+					return
+				}
+				e.pinned(t, w, lm, am, brokerCell{status: http.StatusBadGateway, body: "Sign-in failed", warns: []string{"IdP sign-in failed"}, audit: []string{"login failure"}})
+			})
 			// After the IdP's code is spent, the callback looks the client up to grant offline_access,
 			// on its own context: a request that ends meanwhile neither fails the lookup nor loses the
 			// refresh.
@@ -270,6 +289,9 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				if err := lookups.ctxErr.Load(); err != nil {
 					t.Errorf("the lookup's context ended (%v); want it to outlive the request", *err)
 				}
+				if dl := lookups.deadline.Load(); dl == nil || time.Until(*dl) > CallbackTimeout {
+					t.Errorf("the lookup's deadline %v; want one within CallbackTimeout, so the detached callback is bounded", dl)
+				}
 				e.callbackFinished(t, end, w, lm, am)
 			})
 		})
@@ -280,12 +302,13 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 // enteredLookups resolves clients through inner until armed; then a CIMD lookup says it has
 // entered, waits for release, and resolves through inner, keeping its context's error.
 type enteredLookups struct {
-	inner   registration.Registry
-	armed   atomic.Bool
-	once    sync.Once
-	entered chan struct{}
-	release chan struct{}
-	ctxErr  atomic.Pointer[error]
+	inner    registration.Registry
+	armed    atomic.Bool
+	once     sync.Once
+	entered  chan struct{}
+	release  chan struct{}
+	ctxErr   atomic.Pointer[error]
+	deadline atomic.Pointer[time.Time]
 }
 
 func (l *enteredLookups) Client(ctx context.Context, id string) (registration.Client, error) {
@@ -296,6 +319,9 @@ func (l *enteredLookups) Client(ctx context.Context, id string) (registration.Cl
 	<-l.release
 	if err := ctx.Err(); err != nil {
 		l.ctxErr.Store(&err)
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		l.deadline.Store(&dl)
 	}
 	return l.inner.Client(ctx, id)
 }

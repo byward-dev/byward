@@ -88,8 +88,11 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sealed, asserted, idpExpiry, e, ok := b.refreshIdP(r, g, now)
-	if !ok && e == requestEnded && shutdown.AnswerIfEnded(w, r) {
-		return
+	if !ok && e == requestEnded {
+		if shutdown.AnswerIfEnded(w, r) {
+			return
+		}
+		e = tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"} // never a status 0
 	}
 	if !ok {
 		if sealed != nil {
@@ -157,7 +160,8 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			return end("the IdP ended the session; grant revoked", append([]any{"error", err}, idpAttrs(err)...)...)
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable && (shutdown.ShuttingDown(ctx) || shutdown.ClientWentAway(ctx)):
 			// The refresh waited until its request ended: no failure of the IdP's, and the caller
-			// answers by how the request ended (requestEnded, #672).
+			// answers by how the request ended (requestEnded, #672). The two endings are the ones
+			// shutdown.AnswerIfEnded and logging's endedBy test.
 			return nil, assertedClaims{}, time.Time{}, requestEnded, false
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
 			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, idpAttrs(err)...)...)
