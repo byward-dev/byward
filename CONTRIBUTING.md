@@ -74,7 +74,7 @@ Only submit work you have the right to contribute under Apache-2.0.
     locally: `BYWARD_FORBIDDEN_IDENTIFIERS="$(cat my-list)" go test ./internal/testutil/fixtures`.
 - Fuzz targets (`func Fuzz*`) run their seed corpus in `mise run test`. The nightly `fuzz` workflow
   fuzzes each for 2 minutes (`mise run test:fuzz`; `FUZZTIME=30s` for a shorter local run). It finds
-  new targets by itself. The host decision targets (`FuzzHost*`) are left out; they run on demand
+  new targets by itself. The host decision targets (`FuzzHostDecisions`) are left out; they run on demand
   with `mise run test:fuzz:host` ([host fuzzing](docs/maintainers/host-fuzz.md)). When it fails, its `fuzz-crashers` artifact holds the input: unzip it at the
   repository root, which puts the input in its package's `testdata/fuzz/<Target>/`, and fix the code
   until `go test` passes.

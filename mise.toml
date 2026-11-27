@@ -89,9 +89,9 @@ description = "Nightly fuzz lane: go test -fuzz for FUZZTIME (default 2m) per ta
 run = "sh scripts/fuzz/run.sh"
 
 [tasks."test:fuzz:host"]
-description = "Host decision fuzz targets, on demand and never in CI (#661): go test -fuzz for FUZZTIME (default 2m) per FuzzHost target, against each package's testdata/hostdecisions.allowed (scripts/fuzz/run.sh, docs/maintainers/host-fuzz.md)"
+description = "Host decision fuzz targets, on demand and never in CI (#661): go test -fuzz for FUZZTIME (default 2m) per FuzzHostDecisions target, against each package's testdata/hostdecisions.allowed (scripts/fuzz/run.sh, docs/maintainers/host-fuzz.md)"
 run = "sh scripts/fuzz/run.sh"
-env = { FUZZMATCH = "^FuzzHost" }
+env = { FUZZMATCH = "^FuzzHostDecisions$" }
 
 [tasks."test:load"]
 description = "Scheduled load test (ADR-0024 §10): the latency the wired proxy adds to MCP requests, against 2 ms p99, and proof that the gate catches 5 ms; results in build/load/results.json (docs/maintainers/load-test.md)"

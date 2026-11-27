@@ -14,47 +14,68 @@ import (
 //
 // Every column must not panic. An input it passes must pass again with its host as browsers write
 // it (split, then serialize, then the port as written). A column marked Lists passes only spellings
-// of the hosts on a fixed list, so an input it passes must be a line of testdata/hostdecisions.allowed,
-// in any ASCII letter case. A denylist must stop every input that is a line it stops there, in any
-// ASCII letter case. The other columns take an open set of hosts, which a list of inputs cannot hold
-// (#661's scope), so they get the first two rules only. split and serialize are internal/host's Split
-// and Serialize, passed in because this package imports no production package.
+// of the hosts on a fixed list, so an input it passes, or the form browsers write of it, must be a
+// line of testdata/hostdecisions.allowed in some ASCII letter case. A denylist must stop every
+// input that is such a line of the inputs it stops. The other columns take an open set of hosts,
+// which a list of inputs cannot hold (#661's scope), so they get the first two rules only. split and
+// serialize are internal/host's Split and Serialize, passed in because this package imports no
+// production package.
 func Fuzz(f *testing.F, columns func(testing.TB) []Column, split func(string) (string, string, error), serialize func(string) string) {
 	f.Helper()
-	placings := map[string][][2]string{}
+	z := fuzzer{columns: columns, placings: map[string][][2]string{}, listed: foldedBaseline(f), split: split, serialize: serialize}
 	for _, c := range columns(f) {
-		placings[c.Name] = placing(c.Probes)
+		z.placings[c.Name] = placing(c.Probes)
 	}
-	listed := foldedBaseline(f)
 	for _, in := range cellSeeds() {
 		f.Add(in)
 	}
-	f.Fuzz(func(t *testing.T, h string) {
-		for i, c := range columns(t) {
-			for _, at := range placings[c.Name] {
-				in := at[0] + h + at[1]
-				pass, _ := c.Judge(in)
-				known := listed[line(c.Name, foldASCII(in))]
-				switch {
-				case c.Denies && known && pass:
-					t.Errorf("%s no longer stops %q, a spelling of an input testdata/hostdecisions.allowed says it stops (a widening)", c.Name, in)
-				case c.Lists && pass && !known:
-					t.Errorf("%s passes %q, which testdata/hostdecisions.allowed lists in no letter case (a widening): fix the check, or add the form to hostfamilies' families and its line by hand", c.Name, in)
-				}
-				if !pass || c.Denies {
-					continue
-				}
-				if host, port, err := split(h); err == nil && hasWrittenForm(h, host, at[0] != "") {
-					written := at[0] + bracketed(serialize(host)) + port + at[1]
-					// A fresh column: a check may remember an input it judged (the CIMD registry caches
-					// a fetch), and the form browsers write may be the input itself.
-					if again, reason := columns(t)[i].Judge(written); !again {
-						t.Errorf("%s passes %q but refuses %q, its host as browsers write it: %s", c.Name, in, written, reason)
-					}
-				}
+	f.Fuzz(func(t *testing.T, h string) { z.check(t, h) })
+}
+
+// A fuzzer holds what Fuzz judges a fuzzed host with: the columns, built afresh for each judgement,
+// the text each column places a host in, and the baseline's lines, folded.
+type fuzzer struct {
+	columns   func(testing.TB) []Column
+	placings  map[string][][2]string
+	listed    map[string]bool
+	split     func(string) (string, string, error)
+	serialize func(string) string
+}
+
+// check judges the fuzzed host h in every column, as Fuzz says.
+func (z fuzzer) check(t testing.TB, h string) {
+	t.Helper()
+	for i, c := range z.columns(t) {
+		for _, at := range z.placings[c.Name] {
+			in := at[0] + h + at[1]
+			pass, _ := c.Judge(in)
+			known := z.listed[line(c.Name, foldASCII(in))]
+			host, port, err := z.split(h)
+			written := err == nil && hasWrittenForm(h, host, at[0] != "")
+			browser := at[0] + bracketed(z.serialize(host)) + port + at[1]
+			// A list check takes a listed address in any spelling (127.1, [0::1]): the form browsers
+			// write of one is listed.
+			if !known && written {
+				known = z.listed[line(c.Name, foldASCII(browser))]
+			}
+			switch {
+			case c.Denies && known && pass:
+				t.Errorf("%s no longer stops %q, a spelling of an input testdata/hostdecisions.allowed says it stops (a widening)", c.Name, in)
+			// In a URL, a "/", "?", "#" or backslash ends the host, so the rest of h is a path the list
+			// check does not judge.
+			case c.Lists && pass && !known && (at[0] == "" || !strings.ContainsAny(h, "/?#\\")):
+				t.Errorf("%s passes %q, which testdata/hostdecisions.allowed lists in no letter case (a widening): fix the check, or add the form to hostfamilies' families and its line by hand", c.Name, in)
+			}
+			if !pass || c.Denies || !written {
+				continue
+			}
+			// A fresh column: a check may remember an input it judged (the CIMD registry caches a
+			// fetch), and the form browsers write may be the input itself.
+			if again, reason := z.columns(t)[i].Judge(browser); !again {
+				t.Errorf("%s passes %q but refuses %q, its host as browsers write it: %s", c.Name, in, browser, reason)
 			}
 		}
-	})
+	}
 }
 
 // hasWrittenForm reports whether h, split into host, has a form browsers write to compare: it is
@@ -110,6 +131,7 @@ func cellSeeds() []string {
 	return out
 }
 
+// foldedBaseline is the second reader of the baseline, after checkBaseline, whose loop it copies.
 // foldedBaseline is the lines of testdata/hostdecisions.allowed, each input in ASCII lower case.
 func foldedBaseline(t testing.TB) map[string]bool {
 	t.Helper()
@@ -127,8 +149,9 @@ func foldedBaseline(t testing.TB) map[string]bool {
 	return out
 }
 
-// foldASCII is s with its ASCII letters in lower case and every other byte as it is: the one fold
-// every list check makes, and one that cannot merge two hosts a browser tells apart.
+// foldASCII is s with its ASCII letters in lower case and every other byte as it is: the case a
+// browser may write a host in. A check that folds more (strings.ToLower maps the Kelvin sign to k)
+// passes a form the baseline lists in no ASCII letter case, which is a finding to decide.
 func foldASCII(s string) string {
 	b := []byte(s)
 	for i, c := range b {

@@ -29,7 +29,7 @@ case "\$1 \$2" in
     exit 1 ;;
   empty) printf 'ok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\n'; exit 0 ;;
   esac
-  printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nFuzzHostD\nok  \texample.com/m/c/d\t0.1s\n' |
+  printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nFuzzHostDecisions\nok  \texample.com/m/c/d\t0.1s\n' |
     awk -v p="\$3" '!/^Fuzz/ || \$0 ~ p'
   exit 0 ;;
 esac
@@ -121,11 +121,11 @@ fuzztime=""
 run without-fuzztime-each-target-gets-2m ok "" "" 0 'fuzz lane: ok \(3 targets, 2m each\)' "" "$(printf '%s' "$all" | sed 's/ 1s / 2m /g')"
 fuzztime=1s
 # The host decision targets run only when FUZZMATCH asks for them (#661): the rows above leave
-# FuzzHostD out. FUZZMATCH picks targets by Go's pattern, and drops nothing else.
-fuzzmatch='^FuzzHost'
-run fuzzmatch-runs-only-the-targets-it-names ok "" "" 0 'fuzz lane: ok \(1 targets, 1s each\)' "" "^\$ ^FuzzHostD\$ 1s example.com/m/c/d"
+# FuzzHostDecisions out. FUZZMATCH picks targets by Go's pattern, and drops nothing else.
+fuzzmatch='^FuzzHostDecisions$'
+run fuzzmatch-runs-only-the-targets-it-names ok "" "" 0 'fuzz lane: ok \(1 targets, 1s each\)' "" "^\$ ^FuzzHostDecisions\$ 1s example.com/m/c/d"
 fuzzmatch='^Fuzz'
-run fuzzmatch-of-every-target-runs-the-host-targets-too ok "" "" 0 'fuzz lane: ok \(4 targets, 1s each\)' "" "$all;^\$ ^FuzzHostD\$ 1s example.com/m/c/d"
+run fuzzmatch-of-every-target-runs-the-host-targets-too ok "" "" 0 'fuzz lane: ok \(4 targets, 1s each\)' "" "$all;^\$ ^FuzzHostDecisions\$ 1s example.com/m/c/d"
 fuzzmatch=
 
 # Outside the repository root the lane refuses to run, before it lists or deletes anything.

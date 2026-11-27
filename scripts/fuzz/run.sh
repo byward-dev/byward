@@ -5,9 +5,9 @@
 # package's testdata/fuzz/ is copied under build/fuzz/crashers/ at its repository path, for the
 # workflow to upload, and the lane fails.
 # FUZZMATCH picks the targets instead (a go test -list pattern). Unset, every target but the host
-# decision targets (^FuzzHost, #661) runs: those are run on demand, not in CI.
+# decision targets (FuzzHostDecisions, #661) runs: those are run on demand, not in CI.
 #   FUZZTIME=2m sh scripts/fuzz/run.sh                       (mise run test:fuzz)
-#   FUZZMATCH='^FuzzHost' FUZZTIME=60s sh scripts/fuzz/run.sh (mise run test:fuzz:host)
+#   FUZZMATCH='^FuzzHostDecisions$' FUZZTIME=60s sh scripts/fuzz/run.sh (mise run test:fuzz:host)
 set -eu
 
 fail() {
@@ -18,7 +18,7 @@ fail() {
 fuzztime=${FUZZTIME:-2m}
 match=${FUZZMATCH:-^Fuzz}
 skip=
-[ -n "${FUZZMATCH:-}" ] || skip='^FuzzHost'
+[ -n "${FUZZMATCH:-}" ] || skip='^FuzzHostDecisions$'
 out=build/fuzz/crashers
 mkdir -p build/fuzz
 rm -rf "$out"
