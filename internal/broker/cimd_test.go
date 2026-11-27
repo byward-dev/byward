@@ -260,6 +260,8 @@ const (
 	modeKeysRefused           // the client resolves, but the keys at its jwks_uri are unusable
 	modeBadAssertion          // the client resolves, but its assertion is wrong
 	modeReplayCheckDown       // the client resolves, but the store cannot check its assertion for replay
+	modeWaits                 // the lookup waits on the fetch until its request ends, as CIMDRegistry.Client does (#672)
+	modeKeysWait              // the client resolves, but its keys' fetch waits until the request ends, as idp.KeySet does (#672)
 )
 
 // switchable resolves clients through inner, or fails or changes them as its mode says: modeUnknown
@@ -277,6 +279,9 @@ func (s switchable) Client(ctx context.Context, id string) (registration.Client,
 		return s.inner.Client(ctx, id)
 	}
 	switch s.mode.Load() {
+	case modeWaits:
+		<-ctx.Done()
+		return nil, fmt.Errorf("%w: %v", registration.ErrUnavailable, ctx.Err()) // what the registry's wait returns
 	case modeUnavailable:
 		return nil, fmt.Errorf("%w: refetch timed out", registration.ErrUnavailable)
 	case modeRefused:
@@ -294,6 +299,9 @@ func (s switchable) Client(ctx context.Context, id string) (registration.Client,
 	}
 	if err == nil && s.mode.Load() == modeBadAssertion {
 		return badAssertion{c}, nil
+	}
+	if err == nil && s.mode.Load() == modeKeysWait {
+		return keysWait{c}, nil
 	}
 	if err == nil && s.mode.Load() == modeReplayCheckDown {
 		return replayCheckDown{c}, nil
@@ -321,6 +329,15 @@ type keysBad struct{ registration.Client }
 
 func (keysBad) Authenticate(context.Context, url.Values, http.Header, string, time.Time) error {
 	return fmt.Errorf("%w: jwks_uri answered 404", registration.ErrKeysRefused)
+}
+
+// keysWait's key fetch waits until its request ends, then fails as a jwks_uri fetch whose context
+// ended does: idp.KeySet returns the context's error, which keysTransient takes for transient.
+type keysWait struct{ registration.Client }
+
+func (keysWait) Authenticate(ctx context.Context, _ url.Values, _ http.Header, _ string, _ time.Time) error {
+	<-ctx.Done()
+	return fmt.Errorf("%w: client assertion keys: %v", registration.ErrUnavailable, ctx.Err())
 }
 
 type keysDown struct{ registration.Client }
