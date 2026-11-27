@@ -80,7 +80,7 @@ func observeStream(t *testing.T, modern, acked bool, open func(*bridgeHarness) *
 // recorded with why (#533): client_closed when its MCP client went away, shutdown when the proxy
 // shut down. A listen the shutdown ends with its completion result has completed, so it is not cut
 // off.
-// Lifecycle cells legacy request and GET, client gone and shutdown / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
+// Lifecycle cells legacy request and GET, and modern request and listen, client gone and shutdown / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAStdioStreamEndedByItsRequestIsRecordedAsCutOffUnlessItCompleted(t *testing.T) {
 	for _, stream := range []struct {
 		name string

@@ -38,26 +38,40 @@ type stdioCell struct {
 // request line.
 type stdioRig struct {
 	*bridgeHarness
-	h http.Handler
+	h         http.Handler
+	modernEra bool // the cell's requests are of the modern era: a process outlives them as a userConn, not an MCP session
 }
 
+// newStdioRig serves the fake upstream in its legacy JSON-RPC mode, with flags.
 func newStdioRig(t *testing.T, edit func(*Config), flags ...string) *stdioRig {
 	t.Helper()
+	return newRig(t, edit, false, append([]string{"-mcp"}, flags...)...)
+}
+
+// newModernRig serves the fake upstream as flags make it, to modern-era requests: "-modern" last,
+// or a legacy server that the probe finds legacy.
+func newModernRig(t *testing.T, edit func(*Config), flags ...string) *stdioRig {
+	t.Helper()
+	return newRig(t, edit, true, flags...)
+}
+
+func newRig(t *testing.T, edit func(*Config), modern bool, flags ...string) *stdioRig {
+	t.Helper()
 	b := newBridge(t, func(c *Config) {
-		c.Command = append([]string{fakeBin, "-mcp"}, flags...)
+		c.Command = append([]string{fakeBin}, flags...)
 		if edit != nil {
 			edit(c)
 		}
 	})
-	return &stdioRig{bridgeHarness: b, h: logging.Middleware(slog.New(b.log), b.bridge)}
+	return &stdioRig{bridgeHarness: b, h: logging.Middleware(slog.New(b.log), b.bridge), modernEra: modern}
 }
 
 // start serves a request as alice in the background on a writer read while it is written; the
 // channel closes when the bridge has returned.
-func (r *stdioRig) start(ctx context.Context, method, sid string, body io.Reader) (*brokenWriter, <-chan struct{}) {
+func (r *stdioRig) start(ctx context.Context, method, sid string, body io.Reader, header ...string) (*brokenWriter, <-chan struct{}) {
 	req := httptest.NewRequestWithContext(ctx, method, "/", body)
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	setHeaders(req.Header, "alice", sid)
+	setHeaders(req.Header, "alice", sid, header...)
 	w := &brokenWriter{header: http.Header{}}
 	done := make(chan struct{})
 	go func() {
@@ -96,7 +110,7 @@ func (r *stdioRig) signal(t *testing.T, sig syscall.Signal) {
 // held is what the bridge and its Manager hold: processes, MCP sessions, and what requests in
 // flight hold of them.
 type held struct {
-	live, sessions, leases, streams, inFlight int
+	live, sessions, users, leases, streams, inFlight int
 }
 
 func (r *stdioRig) held() held {
@@ -113,8 +127,17 @@ func (r *stdioRig) held() held {
 	for _, s := range r.bridge.sessions {
 		sessions = append(sessions, s)
 	}
+	users := make([]*userConn, 0, len(r.bridge.users))
+	for _, c := range r.bridge.users {
+		users = append(users, c)
+	}
 	r.bridge.mu.Unlock()
-	h.sessions = len(sessions)
+	h.sessions, h.users = len(sessions), len(users)
+	for _, c := range users {
+		c.mu.Lock()
+		h.inFlight += len(c.byID) + len(c.byToken)
+		c.mu.Unlock()
+	}
 	for _, s := range sessions {
 		s.mu.Lock()
 		h.inFlight += len(s.posts) + len(s.byID)
@@ -154,12 +177,16 @@ func (r *stdioRig) check(t *testing.T, w *brokenWriter, done <-chan struct{}, wa
 	if want.alive {
 		n = 1
 	}
+	baseline := held{live: n, sessions: n}
+	if r.modernEra {
+		baseline = held{live: n, users: n}
+	}
 	var got held
 	deadline := time.Now().Add(guard) // what a request held is let go of by goroutines after it returns
 	// A stopping process is sent SIGTERM, then SIGKILL, a KillGrace apart; a few graces take any
 	// process there, and stay far below IdleTimeout, so no live process's idle timer fires.
 	for graces := 0; ; {
-		if got = r.held(); got == (held{live: n, sessions: n}) || !time.Now().Before(deadline) {
+		if got = r.held(); got == baseline || !time.Now().Before(deadline) {
 			break
 		}
 		if graces < 4 && r.stopping() {
@@ -168,8 +195,8 @@ func (r *stdioRig) check(t *testing.T, w *brokenWriter, done <-chan struct{}, wa
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got != (held{live: n, sessions: n}) {
-		t.Errorf("held %+v once the request ended; want %d process and MCP session, nothing in flight", got, n)
+	if got != baseline {
+		t.Errorf("held %+v once the request ended; want %+v, nothing in flight", got, baseline)
 	}
 	wantWarns := slices.Sorted(slices.Values(want.warns))
 	warns := func() []string {
@@ -280,10 +307,10 @@ var (
 
 // inFlight starts a request whose body the bridge is still reading: the client has sent its first
 // byte and holds the rest.
-func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string) (*brokenWriter, <-chan struct{}, *io.PipeWriter) {
+func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string, header ...string) (*brokenWriter, <-chan struct{}, *io.PipeWriter) {
 	t.Helper()
 	pr, pw := io.Pipe()
-	w, done := r.start(ctx, http.MethodPost, sid, pr)
+	w, done := r.start(ctx, http.MethodPost, sid, pr, header...)
 	read := make(chan struct{})
 	go func() {
 		defer close(read)
@@ -303,10 +330,10 @@ func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string)
 
 // bodyCut is a cell whose request ends while the bridge reads its body, and whose MCP client's
 // connection then fails the read, as the server's does.
-func (r *stdioRig) bodyCut(t *testing.T, end lifecycle.Ending, sid, body string, want stdioCell) {
+func (r *stdioRig) bodyCut(t *testing.T, end lifecycle.Ending, sid, body string, want stdioCell, header ...string) {
 	t.Helper()
 	ctx, stop := endedAs(end).Start(context.Background())
-	w, done, pw := r.inFlight(t, ctx, sid, body)
+	w, done, pw := r.inFlight(t, ctx, sid, body, header...)
 	r.end(end, stop)
 	pw.CloseWithError(errors.New("connection reset by peer"))
 	r.check(t, w, done, want)
@@ -315,14 +342,14 @@ func (r *stdioRig) bodyCut(t *testing.T, end lifecycle.Ending, sid, body string,
 // stdinFull is a cell whose request is being written to a process that reads none of it (stopped,
 // or never reading), its stdin full, when the request ends as end; then resume lets the process go
 // on. kill ends the process instead of the request.
-func (r *stdioRig) stdinFull(t *testing.T, end lifecycle.Ending, sid, body string, before, resume func(), want stdioCell) {
+func (r *stdioRig) stdinFull(t *testing.T, end lifecycle.Ending, sid, body string, before, resume func(), want stdioCell, header ...string) {
 	t.Helper()
 	ctx, stop := context.Background(), func() {}
 	if end != lifecycle.UpstreamGone {
 		ctx, stop = endedAs(end).Start(ctx)
 	}
 	before()
-	w, done := r.start(ctx, http.MethodPost, sid, strings.NewReader(body))
+	w, done := r.start(ctx, http.MethodPost, sid, strings.NewReader(body), header...)
 	waitUntilStdinIsNotWritable(t, r.process(t))
 	if end == lifecycle.UpstreamGone {
 		r.signal(t, syscall.SIGKILL)
@@ -343,6 +370,7 @@ const (
 	noAnswerBound    = "nothing bounds the wait for the process's answer: a held lease stops the idle timer (Process.hold), and a request lease is never evicted; the client leaving or a shutdown ends the wait"
 	noBodyBound      = "the bridge sets no bound on reading or sending a request: Send waits on its request alone, and the server's ReadTimeout bounds a stalled body"
 	crashRace        = "a killed process's exit is logged as unexpected, at WARN, only if it is reaped before the bridge reads its stdout's end; else the bridge stops it for stdout_closed and its exit is logged at INFO (process.go wait), so an operator loses a crash's warning; the cell accepts either until the fix makes it strict"
+	probeBug         = "a modern request whose MCP client goes away, or the proxy shuts down, while the server/discover probe is out waits for the probe's answer (it runs on its own context, as its verdict is shared), and if the upstream proves legacy is answered 400 legacyFallback (modern.go modernPost), not by how it ended"
 	bodyReadBug      = "a request whose MCP client goes away, or the proxy shuts down, while the bridge reads its body is answered 400 \"cannot read the request body\" (bridge.go post), not by how it ended (shutdown.AnswerIfEnded): 499, or 503 and close"
 )
 
@@ -360,8 +388,8 @@ func at(end lifecycle.Ending, state lifecycle.State) lifecycle.Cell {
 	return lifecycle.Cell{Ending: end, State: state}
 }
 
-// The stdio bridge's lifecycle matrix (#672), legacy era: for an initialize, a request to its MCP
-// session and the session's GET stream, every way the request ends crossed with every state its
+// The stdio bridge's lifecycle matrix (#672): for a legacy initialize, a request to its MCP session
+// and the session's GET stream, and for a modern request and listen, every way the request ends crossed with every state its
 // work can be in pins what the MCP client gets, the request line and the warnings, and that the
 // request leaves nothing held: no lease, stream or entry in flight, and the process and MCP
 // session alive only if the cell says so.
@@ -369,6 +397,8 @@ func TestTheStdioBridgeLifecycleMatrix(t *testing.T) {
 	t.Run("legacy initialize", func(t *testing.T) { lifecycle.Run(t, legacyInitializeMatrix()) })
 	t.Run("legacy request", func(t *testing.T) { lifecycle.Run(t, legacyRequestMatrix()) })
 	t.Run("legacy GET", func(t *testing.T) { lifecycle.Run(t, legacyGETMatrix()) })
+	t.Run("modern request", func(t *testing.T) { lifecycle.Run(t, modernRequestMatrix()) })
+	t.Run("modern listen", func(t *testing.T) { lifecycle.Run(t, modernListenMatrix()) })
 }
 
 func legacyInitializeMatrix() map[lifecycle.Cell]lifecycle.Case {
@@ -636,6 +666,208 @@ func legacyGETMatrix() map[lifecycle.Cell]lifecycle.Case {
 			t.Fatalf("a new MCP session past the stream idle timeout: status %d", next.StatusCode)
 		}
 		r.check(t, w, done, stdioCell{status: http.StatusOK, alive: true})
+	})
+	return m
+}
+
+// modernStart serves body as alice's modern-era request in the background, with the headers a
+// compliant client sends.
+func (r *stdioRig) modernStart(ctx context.Context, body string) (*brokenWriter, <-chan struct{}) {
+	return r.start(ctx, http.MethodPost, "", strings.NewReader(body), modernHeaders(body)...)
+}
+
+// warm starts alice's process with a first modern request, served past the matrix; its log is set
+// aside, as session's is, so a cell sees only its own.
+func (r *stdioRig) warm(t *testing.T) {
+	t.Helper()
+	res := r.modern(t, "alice", modernBody(`0`, "echo", "", ""))
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("first modern request: status %d", res.StatusCode)
+	}
+	readEvents(t, res)
+	r.log.mu.Lock()
+	*r.log.recs = (*r.log.recs)[:0]
+	r.log.mu.Unlock()
+}
+
+// cancelledUpstream waits until the upstream has seen the cell's request cancelled.
+func (r *stdioRig) cancelledUpstream(t *testing.T) {
+	t.Helper()
+	eventually(t, "the upstream to see the request cancelled", func() bool { return len(r.upstreamCancellations(t)) == 1 })
+}
+
+func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
+	m := map[lifecycle.Cell]lifecycle.Case{}
+	unreachableColumns(m)
+	echo := modernBody(`1`, "echo", "", `"tag":"lifecycle"`)
+	hold := modernBody(`"h"`, "hold", "", "")
+	bigEcho := modernBody(`1`, "echo", "", `"pad":"`+strings.Repeat("a", 512<<10)+`"`)
+	for _, end := range []lifecycle.Ending{lifecycle.ClientGone, lifecycle.Shutdown} {
+		m[at(end, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
+			r := newModernRig(t, nil, "-modern")
+			ctx, stop := endedAs(end).Start(context.Background())
+			stop()
+			w, done := r.modernStart(ctx, echo)
+			r.check(t, w, done, endedCell(end, false))
+		})
+		m[at(end, lifecycle.BodyInFlight)] = lifecycle.KnownResidual("#672", bodyReadBug, func(t *testing.T) {
+			t.Run("its body is read", func(t *testing.T) {
+				r := newModernRig(t, nil, "-modern")
+				r.bodyCut(t, end, "", echo, stdioCell{status: http.StatusBadRequest, body: cannotRead}, modernHeaders(echo)...)
+			})
+			t.Run("it is sent", func(t *testing.T) { // a message cut short stops the shared process: partial_write
+				r := newModernRig(t, nil, "-modern")
+				r.warm(t)
+				r.stdinFull(t, end, "", bigEcho, func() { r.signal(t, syscall.SIGSTOP) }, func() { r.signal(t, syscall.SIGCONT) }, endedCell(end, false), modernHeaders(bigEcho)...)
+			})
+		})
+		m[at(end, lifecycle.AwaitingHeaders)] = lifecycle.KnownResidual("#672", probeBug, func(t *testing.T) {
+			t.Run("the upstream proves modern", func(t *testing.T) {
+				r := newModernRig(t, nil, "-holddiscover", "-modern")
+				ctx, stop := endedAs(end).Start(context.Background())
+				w, done := r.modernStart(ctx, echo)
+				r.saidOnStderr(t, "holding discover")
+				r.end(end, stop)
+				r.signal(t, syscall.SIGUSR1)
+				r.check(t, w, done, endedCell(end, true))
+			})
+			t.Run("the upstream proves legacy", func(t *testing.T) { // the residual: legacyFallback's 400
+				r := newModernRig(t, nil, "-mcp", "-invaliddiscover", "-holddiscover")
+				ctx, stop := endedAs(end).Start(context.Background())
+				w, done := r.modernStart(ctx, echo)
+				r.saidOnStderr(t, "holding discover")
+				r.end(end, stop)
+				r.signal(t, syscall.SIGUSR1)
+				r.check(t, w, done, stdioCell{status: http.StatusBadRequest, body: "speaks MCP 2025-11-25"})
+			})
+		})
+		m[at(end, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) { // cancelled upstream too
+			r := newModernRig(t, nil, "-modern")
+			ctx, stop := endedAs(end).Start(context.Background())
+			w, done := r.modernStart(ctx, hold)
+			eventually(t, "the stream to start", w.hasStarted)
+			r.end(end, stop)
+			r.check(t, w, done, cutCell(end, true))
+			r.cancelledUpstream(t)
+		})
+	}
+	m[at(lifecycle.UpstreamGone, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
+		r := newModernRig(t, nil, "-modern")
+		r.m.start = func(*exec.Cmd) error { return errors.New("exec: no such file") }
+		w, done := r.modernStart(context.Background(), echo)
+		r.check(t, w, done, stdioCell{status: http.StatusBadGateway, body: unavailable, warns: []string{cannotStart}})
+	})
+	m[at(lifecycle.Timeout, lifecycle.NotStarted)] = lifecycle.NotRun("SpawnTimeout is 30 s of real time around the spawn, which the start hook cannot see; TestStartThatOverrunsTheSpawnTimeoutKillsTheProcessAndLeavesNothingBehind pins it at the Manager")
+	m[at(lifecycle.Completes, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
+		r := newModernRig(t, nil, "-modern")
+		w, done, pw := r.inFlight(t, context.Background(), "", echo, modernHeaders(echo)...)
+		_, _ = io.WriteString(pw, echo[1:])
+		_ = pw.Close()
+		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"lifecycle"`, alive: true})
+	})
+	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+		r := newModernRig(t, nil, "-modern")
+		r.warm(t)
+		r.stdinFull(t, lifecycle.UpstreamGone, "", bigEcho, func() { r.signal(t, syscall.SIGSTOP) }, func() {},
+			stdioCell{status: http.StatusBadGateway, body: unavailable, warns: []string{relayFailed}, crash: true}, modernHeaders(bigEcho)...)
+	})
+	m[at(lifecycle.Timeout, lifecycle.BodyInFlight)] = lifecycle.Unreachable(noBodyBound)
+	m[at(lifecycle.Completes, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
+		r := newModernRig(t, nil, "-holddiscover", "-modern")
+		w, done := r.modernStart(context.Background(), echo)
+		r.saidOnStderr(t, "holding discover")
+		r.signal(t, syscall.SIGUSR1)
+		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"lifecycle"`, alive: true})
+	})
+	m[at(lifecycle.UpstreamGone, lifecycle.AwaitingHeaders)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+		r := newModernRig(t, nil, "-exitondiscover", "-modern")
+		w, done := r.modernStart(context.Background(), echo)
+		r.check(t, w, done, stdioCell{status: http.StatusBadGateway, body: unavailable, warns: []string{relayFailed}, crash: true})
+	})
+	// The probe's own bound, a field tests shorten, in real time: an upstream that never answers it
+	// is taken for a legacy one. Waited on as an event; check's bounds are guard, over 100 times it.
+	m[at(lifecycle.Timeout, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
+		r := newModernRig(t, nil, "-mcp", "-silentdiscover")
+		r.bridge.probeTimeout = 50 * time.Millisecond
+		w, done := r.modernStart(context.Background(), echo)
+		r.check(t, w, done, stdioCell{status: http.StatusBadRequest, body: "speaks MCP 2025-11-25"})
+	})
+	m[at(lifecycle.Completes, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
+		r := newModernRig(t, nil, "-modern")
+		w, done := r.modernStart(context.Background(), hold)
+		eventually(t, "the stream to start", w.hasStarted)
+		readEvents(t, r.modern(t, "alice", modernBody(`"r"`, "release", "", "")))
+		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"released"`, alive: true})
+	})
+	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+		r := newModernRig(t, nil, "-modern")
+		w, done := r.modernStart(context.Background(), hold)
+		eventually(t, "the stream to start", w.hasStarted)
+		r.signal(t, syscall.SIGKILL)
+		r.check(t, w, done, stdioCell{status: http.StatusOK, body: processEnded, crash: true})
+	})
+	m[at(lifecycle.Timeout, lifecycle.Streaming)] = lifecycle.NotRun(noWriteBound)
+	return m
+}
+
+func modernListenMatrix() map[lifecycle.Cell]lifecycle.Case {
+	m := map[lifecycle.Cell]lifecycle.Case{}
+	unreachableColumns(m)
+	const sameAsRequest = "a listen takes the modern request's path until it is sent (modern.go post, up to c.request): the modern request's cell pins it"
+	for _, end := range lifecycle.Endings {
+		for _, s := range []lifecycle.State{lifecycle.NotStarted, lifecycle.BodyInFlight, lifecycle.AwaitingHeaders} {
+			if c := at(end, s); c != at(lifecycle.Completes, lifecycle.NotStarted) {
+				m[c] = lifecycle.NotRun(sameAsRequest)
+			}
+		}
+	}
+	open := func(t *testing.T, r *stdioRig, ctx context.Context) (*brokenWriter, <-chan struct{}) {
+		t.Helper()
+		w, done := r.modernStart(ctx, listenBody)
+		eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+		return w, done
+	}
+	m[at(lifecycle.Completes, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) { // the upstream ends it
+		r := newModernRig(t, nil, "-modern")
+		w, done := open(t, r, context.Background())
+		readEvents(t, r.modern(t, "alice", modernBody(`"e"`, "endlistens", "", "")))
+		r.check(t, w, done, stdioCell{status: http.StatusOK, body: completeResult, alive: true})
+	})
+	m[at(lifecycle.ClientGone, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
+		r := newModernRig(t, nil, "-modern")
+		ctx, stop := endedAs(lifecycle.ClientGone).Start(context.Background())
+		w, done := open(t, r, ctx)
+		stop()
+		r.check(t, w, done, cutCell(lifecycle.ClientGone, true))
+		r.cancelledUpstream(t)
+	})
+	// The server ends the subscription: it says so with a completion result (2026-07-28
+	// subscriptions), so the stream ends whole, not cut.
+	m[at(lifecycle.Shutdown, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
+		r := newModernRig(t, nil, "-modern")
+		ctx, stop := endedAs(lifecycle.Shutdown).Start(context.Background())
+		w, done := open(t, r, ctx)
+		r.end(lifecycle.Shutdown, stop)
+		r.check(t, w, done, stdioCell{status: http.StatusOK, body: completeResult, alive: true})
+		r.cancelledUpstream(t)
+	})
+	m[at(lifecycle.UpstreamGone, lifecycle.Streaming)] = lifecycle.KnownResidual("#672", crashRace, func(t *testing.T) {
+		r := newModernRig(t, nil, "-modern")
+		w, done := open(t, r, context.Background())
+		r.signal(t, syscall.SIGKILL)
+		r.check(t, w, done, stdioCell{status: http.StatusOK, body: processEnded, crash: true})
+	})
+	// A quiet listen's process is evicted past StreamIdleTimeout for another user's, under the
+	// process cap: the server ends the subscription, with its completion result.
+	m[at(lifecycle.Timeout, lifecycle.Streaming)] = lifecycle.Pinned(func(t *testing.T) {
+		r := newModernRig(t, func(c *Config) {
+			c.MaxProcesses = 1
+			c.StreamIdleTimeout = streamIdle
+		}, "-modern")
+		w, done := open(t, r, context.Background())
+		r.clk.Advance(streamIdle)
+		readEvents(t, r.modern(t, "bob", modernBody(`1`, "echo", "", "")))
+		r.check(t, w, done, stdioCell{status: http.StatusOK, body: completeResult, alive: true})
 	})
 	return m
 }

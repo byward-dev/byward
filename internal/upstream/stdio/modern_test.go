@@ -253,6 +253,7 @@ func TestLegacyVerdictExpiresAndTheUpstreamIsProbedAgain(t *testing.T) {
 // nothing about the server (#568): the request is answered 502 and logged as a failure, no verdict
 // of either kind is cached and the probe stops nothing, so the next user's process is probed
 // afresh. Before #568 a failed probe of any kind cached the upstream as legacy.
+// Lifecycle cells modern request, completes, upstream gone and timeout / awaiting headers (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestOnlyAProbeTheProcessAnswersOrLetsTimeOutDecidesTheUpstreamsEra(t *testing.T) {
 	const requests = 2 // alice's: on a live process the second shares the first's probe (the write fails); else a verdict or a new process answers it
 	for _, c := range []struct {
@@ -382,6 +383,7 @@ func TestAnEndedRequestWhoseProbeCannotBeWrittenIsAnsweredByHowItEnded(t *testin
 // request's end ended the probe, it would have read as a probe not answered in time, cached the
 // upstream as legacy for every user and stopped the process as not_modern. The fake holds its
 // answer until the test has ended the request.
+// Lifecycle cells modern request, client gone and shutdown / awaiting headers (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestARequestThatEndsDuringTheProbeDecidesNothing(t *testing.T) {
 	for _, e := range lifecycle.ContextEndings {
 		t.Run(e.Ending.String(), func(t *testing.T) {
@@ -636,6 +638,7 @@ func (b *bridgeHarness) awaitUpstreamCancellation(t *testing.T) []string {
 	return ids
 }
 
+// Lifecycle cells modern request, client gone / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestClosingTheStreamCancelsTheRequestOnTheUpstream(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -746,6 +749,7 @@ func TestFullModernStreamDropsTheNotification(t *testing.T) {
 	}
 }
 
+// Lifecycle cells modern request and listen, upstream gone / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestUpstreamProcessCrashFailsInFlightModernRequestsUnderTheirIDsAndTheNextRequestRespawnsIt(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1080,6 +1084,7 @@ func TestARequestTrailerIsNeverReadAsAHeader(t *testing.T) {
 	}
 }
 
+// Lifecycle cells modern listen, timeout / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAQuietListensProcessIsEvictedForAnotherUserAndTheListenGetsACompletionResult(t *testing.T) {
 	b := newModernBridge(t, func(c *Config) {
 		c.MaxProcesses = 1
@@ -1104,6 +1109,7 @@ func TestAQuietListensProcessIsEvictedForAnotherUserAndTheListenGetsACompletionR
 // Shutdown (2026-07-28 subscriptions): "When the server ends a subscription on its own initiative
 // (for example, during shutdown), it SHOULD respond to the original subscriptions/listen request
 // with a completion result before closing the stream."
+// Lifecycle cells modern listen, shutdown / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestDrainCompletesAndCancelsUpstreamEachOpenListenUnderTheClientsIDButLeavesOtherRequestsRunning(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -23,7 +23,7 @@
 // and -invaliddiscover answer it with -32602;
 // flag -exitondiscover, given before -modern, makes serveModern exit with status 3 on reading it,
 // and -holddiscover, also before -modern, answer it only on SIGUSR1 (writing "holding discover" to
-// stderr once it has read it).
+// stderr once it has read it); with -mcp -invaliddiscover, -holddiscover holds its -32602 the same way.
 //
 // Flag -readn=N writes "waiting" to stderr once it listens for SIGUSR1, reads no stdin until it,
 // then reads exactly N bytes, writes "read N" to stderr, and reads nothing more until a second
@@ -356,7 +356,15 @@ func serveMCP() {
 			continue
 		}
 		if m.Method == "server/discover" && invalidDiscover { // as the Python SDK answers a request before initialize
-			write(message{ID: m.ID, Error: json.RawMessage(`{"code":-32602,"message":"Invalid request parameters"}`)})
+			invalid := func(id json.RawMessage) {
+				write(message{ID: id, Error: json.RawMessage(`{"code":-32602,"message":"Invalid request parameters"}`)})
+			}
+			if holdDiscover != nil {
+				fmt.Fprintln(os.Stderr, "holding discover")
+				go func(id json.RawMessage) { <-holdDiscover; invalid(id) }(m.ID)
+				continue
+			}
+			invalid(m.ID)
 			continue
 		}
 		switch m.Method {

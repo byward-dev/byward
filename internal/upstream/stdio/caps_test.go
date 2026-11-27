@@ -541,6 +541,7 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 // would have evicted, another user's, keeps running, and the request is answered by how it ended
 // (#551), whether it would have held its process with a request lease or a stream lease. On main it
 // evicted that process, and only then was refused for having ended.
+// Lifecycle cells modern request, client gone and shutdown / not started (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestARequestThatHasEndedEvictsNoProcessAtTheUpstreamCapAndIsAnsweredByHowItEnded(t *testing.T) {
 	for _, req := range []struct{ name, body string }{
 		{"a request", modernBody(`1`, "echo", "", "")},

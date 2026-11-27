@@ -36,7 +36,7 @@ const modernNotification = `{"jsonrpc":"2.0","method":"notifications/progress","
 // On main the bridge logged "relaying to the upstream process failed" or "cannot start the upstream
 // process" with context canceled, and answered 502. A running process is leased even to a request
 // that has ended, so each row reaches the path its name says, every run.
-// Lifecycle cells legacy initialize, request and GET, client gone and shutdown / not started (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
+// Lifecycle cells legacy initialize, request and GET, and modern request, client gone and shutdown / not started (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestARequestThatEndsBeforeTheUpstreamProcessAnswersIsAnsweredByHowItEndedAndNeverLoggedAsAFailure(t *testing.T) {
 	for _, path := range []struct {
 		name string
@@ -189,6 +189,7 @@ func TestAnEndedGETNeverReplacesItsMCPSessionsLiveGETStream(t *testing.T) {
 // server's choice: it gets its completion result (2026-07-28 subscriptions) and is cancelled
 // upstream. A listen whose MCP client went away gets no completion, only the upstream cancellation
 // (#529).
+// Lifecycle cells modern listen, client gone and shutdown / streaming (TestTheStdioBridgeLifecycleMatrix); kept for what it pins beyond them.
 func TestAListenEndedByTheProxyShuttingDownGetsItsCompletionAndOneWhoseMCPClientWentAwayDoesNot(t *testing.T) {
 	for _, e := range lifecycle.ContextEndings {
 		t.Run(e.Ending.String(), func(t *testing.T) {
