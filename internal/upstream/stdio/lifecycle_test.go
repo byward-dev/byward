@@ -296,25 +296,20 @@ var (
 
 // inFlight starts a request whose body the bridge is still reading: the client has sent its first
 // byte and holds the rest.
-func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string, header ...string) (*brokenWriter, <-chan struct{}, *io.PipeWriter) {
+func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string, header ...string) (*brokenWriter, <-chan struct{}, *lifecycle.CutBody) {
 	t.Helper()
-	pr, pw := io.Pipe()
-	w, done := r.start(ctx, http.MethodPost, sid, pr, header...)
-	read := make(chan struct{})
-	go func() {
-		defer close(read)
-		_, _ = io.WriteString(pw, body[:1]) // returns once the bridge has read it, or the pipe is closed
-	}()
+	b := lifecycle.NewCutBody(body)
+	w, done := r.start(ctx, http.MethodPost, sid, b, header...)
 	select {
-	case <-read:
+	case <-b.Started():
 	case <-done:
-		_ = pw.Close()
+		b.Stop()
 		t.Fatalf("the bridge answered %q before it read the request body", w.written())
 	case <-time.After(guard):
-		_ = pw.Close()
+		b.Stop()
 		t.Fatal("the bridge never read the request body")
 	}
-	return w, done, pw
+	return w, done, b
 }
 
 // bodyCut is a cell whose request ends while the bridge reads its body, and whose MCP client's
@@ -322,9 +317,9 @@ func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string,
 func (r *stdioRig) bodyCut(t *testing.T, end lifecycle.Ending, sid, body string, want stdioCell, header ...string) {
 	t.Helper()
 	ctx, stop := endedAs(end).Start(context.Background())
-	w, done, pw := r.inFlight(t, ctx, sid, body, header...)
+	w, done, b := r.inFlight(t, ctx, sid, body, header...)
 	r.end(end, stop)
-	pw.CloseWithError(errors.New("connection reset by peer"))
+	b.Cut()
 	r.check(t, w, done, want)
 }
 
@@ -442,9 +437,8 @@ func legacyInitializeMatrix() map[lifecycle.Cell]lifecycle.Case {
 	m[at(lifecycle.Timeout, lifecycle.NotStarted)] = lifecycle.NotRun("SpawnTimeout is 30 s of real time around the spawn, which the start hook cannot see; TestStartThatOverrunsTheSpawnTimeoutKillsTheProcessAndLeavesNothingBehind pins it at the Manager")
 	m[at(lifecycle.Completes, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
-		w, done, pw := r.inFlight(t, context.Background(), "", initialize)
-		_, _ = io.WriteString(pw, initialize[1:])
-		_ = pw.Close()
+		w, done, b := r.inFlight(t, context.Background(), "", initialize)
+		b.Finish()
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"protocolVersion"`, alive: true})
 	})
 	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
@@ -552,9 +546,8 @@ func legacyRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 	m[at(lifecycle.Completes, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newStdioRig(t, nil)
 		sid := r.session(t)
-		w, done, pw := r.inFlight(t, context.Background(), sid, toolsList)
-		_, _ = io.WriteString(pw, toolsList[1:])
-		_ = pw.Close()
+		w, done, b := r.inFlight(t, context.Background(), sid, toolsList)
+		b.Finish()
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"id":2`, alive: true})
 	})
 	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
@@ -772,9 +765,8 @@ func modernRequestMatrix() map[lifecycle.Cell]lifecycle.Case {
 	m[at(lifecycle.Timeout, lifecycle.NotStarted)] = lifecycle.NotRun("SpawnTimeout is 30 s of real time around the spawn, which the start hook cannot see; TestStartThatOverrunsTheSpawnTimeoutKillsTheProcessAndLeavesNothingBehind pins it at the Manager")
 	m[at(lifecycle.Completes, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 		r := newModernRig(t, nil, "-modern")
-		w, done, pw := r.inFlight(t, context.Background(), "", echo, modernHeaders(echo)...)
-		_, _ = io.WriteString(pw, echo[1:])
-		_ = pw.Close()
+		w, done, b := r.inFlight(t, context.Background(), "", echo, modernHeaders(echo)...)
+		b.Finish()
 		r.check(t, w, done, stdioCell{status: http.StatusOK, body: `"lifecycle"`, alive: true})
 	})
 	m[at(lifecycle.UpstreamGone, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {

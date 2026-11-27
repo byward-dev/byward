@@ -198,11 +198,10 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	var body io.Reader = strings.NewReader(toolsList)
-	var rest *io.PipeWriter
+	var rest *lifecycle.CutBody
 	if state == lifecycle.BodyInFlight {
-		pr, pw := io.Pipe()
-		body, rest = pr, pw
-		go func() { _, _ = io.WriteString(pw, toolsList[:1]) }()
+		rest = lifecycle.NewCutBody(toolsList)
+		body = rest
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.srv.URL+"/mcp", body)
 	if err != nil {
@@ -249,7 +248,7 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 	switch end {
 	case lifecycle.Completes:
 		if rest != nil {
-			go func() { _, _ = io.WriteString(rest, toolsList[1:]); _ = rest.Close() }()
+			rest.Finish()
 		}
 		close(r.finish)
 	case lifecycle.ClientGone:
@@ -260,7 +259,7 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 		r.shutDown()
 	}
 	if rest != nil && end != lifecycle.Completes {
-		_ = rest.Close() // the client stops sending: it gave up, or the proxy has answered
+		rest.Stop() // the client stops sending: it gave up, or the proxy has answered
 	}
 	var res clientResult
 	select {
@@ -269,7 +268,7 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 		t.Fatal("the client got no answer")
 	}
 	if rest != nil {
-		_ = rest.Close()
+		rest.Stop()
 	}
 	closed := make(chan struct{})
 	go func() { r.srv.Close(); close(closed) }() // waits for the handler, so its slot and log are done
