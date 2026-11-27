@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/hostfamilies"
 )
@@ -13,6 +14,15 @@ import (
 // discovery check that takes a new form fails by name (#656): with an https issuer, and in
 // development mode with a loopback http one; and the issuer as the adapter takes it.
 func TestEveryOIDCHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
+	hostfamilies.Run(t, "internal/idp/oidc", hostColumns(t))
+}
+
+// FuzzHostDecisions fuzzes the host each of these checks reads, beyond the golden's families (#661):
+// see hostfamilies.Fuzz for what it fails.
+func FuzzHostDecisions(f *testing.F) { hostfamilies.Fuzz(f, hostColumns, host.Split, host.Serialize) }
+
+// hostColumns are the checks the golden test and FuzzHostDecisions judge.
+func hostColumns(testing.TB) []hostfamilies.Column {
 	judge := func(issuer string, dev bool) func(string) (bool, string) {
 		return func(in string) (bool, string) {
 			if err := checkURL(in, issuer, dev); err != nil {
@@ -22,7 +32,7 @@ func TestEveryOIDCHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
 		}
 	}
 	endpoints := hostfamilies.URLProbes("/token", "https", "http")
-	hostfamilies.Run(t, "internal/idp/oidc", []hostfamilies.Column{
+	return []hostfamilies.Column{
 		{Name: "IdP endpoint", Probes: endpoints, Judge: judge("https://idp.example.com/realms/a", false)},
 		{Name: "IdP endpoint, --dev", Probes: endpoints, Judge: judge("http://127.0.0.1:8080/realms/a", true)},
 		// The issuer itself, as New takes it outside development mode: config's parseIssuer (column
@@ -34,5 +44,5 @@ func TestEveryOIDCHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
 			}
 			return true, ""
 		}},
-	})
+	}
 }

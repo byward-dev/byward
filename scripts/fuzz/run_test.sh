@@ -1,6 +1,6 @@
 #!/bin/sh
 # Table test for run.sh with a stub `go` first on PATH (no fuzzing, no network). The stub lists
-# fixture targets, records each run's -run, -fuzz, -fuzztime and package exactly as given, and for
+# the fixture targets the -list pattern matches, as Go does, records each run's -run, -fuzz, -fuzztime and package exactly as given, and for
 # the targets a case marks failing exits 1, as Go does, writing a failing input under
 # testdata/fuzz/<Target>/ unless the case says it writes none. Each case runs in its own git
 # repository, so git ls-files finds new inputs as run.sh would.
@@ -29,7 +29,8 @@ case "\$1 \$2" in
     exit 1 ;;
   empty) printf 'ok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\n'; exit 0 ;;
   esac
-  printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nok  \texample.com/m/c/d\t0.1s\n'
+  printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nFuzzHostD\nok  \texample.com/m/c/d\t0.1s\n' |
+    awk -v p="\$3" '!/^Fuzz/ || \$0 ~ p'
   exit 0 ;;
 esac
 shift # test
@@ -60,6 +61,7 @@ chmod +x "$tmp/bin/go"
 
 all="^\$ ^FuzzA\$ 1s example.com/m/a;^\$ ^FuzzB\$ 1s example.com/m/a;^\$ ^FuzzC\$ 1s example.com/m/c/d"
 fuzztime=1s # FUZZTIME for the next rows; empty leaves it unset
+fuzzmatch=  # FUZZMATCH for the next rows; empty leaves it unset
 
 # case name | listing (ok, fails, empty) | targets failing with an input | targets failing without
 # one | want exit | want output (grep -E patterns, ;-separated, each required) | want crashers (space-separated) | want runs (;-separated) |
@@ -81,6 +83,7 @@ run() {
   out=$(
     cd "$repo" || exit
     if [ -n "$fuzztime" ]; then export FUZZTIME="$fuzztime"; else unset FUZZTIME; fi
+    if [ -n "$fuzzmatch" ]; then export FUZZMATCH="$fuzzmatch"; else unset FUZZMATCH; fi
     PATH="$tmp/bin:$PATH" sh "$script" 2>&1
   )
   code=$?
@@ -117,6 +120,13 @@ run no-targets-is-a-failure empty "" "" 1 'FAIL: no fuzz targets found' "" ""
 fuzztime=""
 run without-fuzztime-each-target-gets-2m ok "" "" 0 'fuzz lane: ok \(3 targets, 2m each\)' "" "$(printf '%s' "$all" | sed 's/ 1s / 2m /g')"
 fuzztime=1s
+# The host decision targets run only when FUZZMATCH asks for them (#661): the rows above leave
+# FuzzHostD out. FUZZMATCH picks targets by Go's pattern, and drops nothing else.
+fuzzmatch='^FuzzHost'
+run fuzzmatch-runs-only-the-targets-it-names ok "" "" 0 'fuzz lane: ok \(1 targets, 1s each\)' "" "^\$ ^FuzzHostD\$ 1s example.com/m/c/d"
+fuzzmatch='^Fuzz'
+run fuzzmatch-of-every-target-runs-the-host-targets-too ok "" "" 0 'fuzz lane: ok \(4 targets, 1s each\)' "" "$all;^\$ ^FuzzHostD\$ 1s example.com/m/c/d"
+fuzzmatch=
 
 # Outside the repository root the lane refuses to run, before it lists or deletes anything.
 mkdir -p "$tmp/not-root/build/fuzz/crashers" && : >"$tmp/not-root/build/fuzz/crashers/kept"

@@ -94,6 +94,7 @@ The IdP guides above start with what to register at the IdP; these pages go furt
 - [Cut a release](maintainers/release.md).
 - [The scheduled real-Entra lane](maintainers/real-entra-lane.md).
 - [Run and read the load test](maintainers/load-test.md).
+- [Fuzz the host checks](maintainers/host-fuzz.md): on demand, against the host decision baseline.
 - [Agent fleet rules](maintainers/agent-fleet.md): when several coding agents work at once.
 
 ## Archive

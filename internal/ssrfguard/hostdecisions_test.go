@@ -6,6 +6,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/testutil/hostfamilies"
 )
 
@@ -14,12 +15,21 @@ import (
 // dial, so a guard that would fetch a new form fails by name (#656). The dial is a test hook that
 // records it was reached and dials nothing; the address check at dial is ssrfguard's own tests'.
 func TestTheGuardsURLRuleDecidesEveryHostFamilyAsPinned(t *testing.T) {
+	hostfamilies.Run(t, "internal/ssrfguard", hostColumns(t))
+}
+
+// FuzzHostDecisions fuzzes the host each of these checks reads, beyond the golden's families (#661):
+// see hostfamilies.Fuzz for what it fails.
+func FuzzHostDecisions(f *testing.F) { hostfamilies.Fuzz(f, hostColumns, host.Split, host.Serialize) }
+
+// hostColumns are the checks the golden test and FuzzHostDecisions judge.
+func hostColumns(testing.TB) []hostfamilies.Column {
 	var reached bool
 	f := New(Config{Dial: func(context.Context, string, string) (net.Conn, error) {
 		reached = true
 		return nil, errors.New("not dialled")
 	}})
-	hostfamilies.Run(t, "internal/ssrfguard", []hostfamilies.Column{
+	return []hostfamilies.Column{
 		{Name: "SSRF guard URL", Probes: hostfamilies.URLProbes("/jwks.json", "https", "http"), Judge: func(in string) (bool, string) {
 			reached = false
 			_, err := f.Get(context.Background(), in, 1)
@@ -31,5 +41,5 @@ func TestTheGuardsURLRuleDecidesEveryHostFamilyAsPinned(t *testing.T) {
 			}
 			return false, "not dialled"
 		}},
-	})
+	}
 }

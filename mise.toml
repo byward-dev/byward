@@ -85,8 +85,13 @@ description = "Scheduled real-Entra lane: byward check and doctor against the ma
 run = "sh scripts/real-entra/run.sh"
 
 [tasks."test:fuzz"]
-description = "Nightly fuzz lane: go test -fuzz for FUZZTIME (default 2m) per target, every target go test -list finds; failing inputs land in build/fuzz/crashers (scripts/fuzz/run.sh)"
+description = "Nightly fuzz lane: go test -fuzz for FUZZTIME (default 2m) per target, every target go test -list finds but the host decision targets (test:fuzz:host); failing inputs land in build/fuzz/crashers (scripts/fuzz/run.sh)"
 run = "sh scripts/fuzz/run.sh"
+
+[tasks."test:fuzz:host"]
+description = "Host decision fuzz targets, on demand and never in CI (#661): go test -fuzz for FUZZTIME (default 2m) per FuzzHost target, against each package's testdata/hostdecisions.allowed (scripts/fuzz/run.sh, docs/maintainers/host-fuzz.md)"
+run = "sh scripts/fuzz/run.sh"
+env = { FUZZMATCH = "^FuzzHost" }
 
 [tasks."test:load"]
 description = "Scheduled load test (ADR-0024 §10): the latency the wired proxy adds to MCP requests, against 2 ms p99, and proof that the gate catches 5 ms; results in build/load/results.json (docs/maintainers/load-test.md)"
