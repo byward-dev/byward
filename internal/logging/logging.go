@@ -1,10 +1,10 @@
 // Package logging builds the proxy's slog logger: an allowlist of attribute keys, redaction of
-// bearer-shaped values, UTC timestamps, and a request ID per request (ADR-0021). It also holds how
-// logs and error messages may show what can carry a secret: URL (and MarkedURL for a URL setting)
-// for a URL, Hidden for an operator's value, NotShown for a refused value, by its length only, and
-// FileError for a file's error, never its path. And it observes each request for the request line,
-// the request metric and the server span: the status it sent and, for a response cut off after its
-// headers, why (Observe, CutOff).
+// bearer-shaped values, UTC timestamps, a request ID per request (ADR-0021), and in JSON lines
+// every non-printable rune escaped (#690). It also holds how logs and error messages may show what
+// can carry a secret: URL (and MarkedURL for a URL setting) for a URL, Hidden for an operator's
+// value, NotShown for a refused value, by its length only, and FileError for a file's error, never
+// its path. And it observes each request for the request line, the request metric and the server
+// span: the status it sent and, for a response cut off after its headers, why (Observe, CutOff).
 package logging
 
 import (
@@ -72,7 +72,7 @@ func New(w io.Writer, format string) *slog.Logger {
 	if format == "text" {
 		return slog.New(requestIDHandler{Handler: slog.NewTextHandler(w, opts)})
 	}
-	return slog.New(requestIDHandler{Handler: slog.NewJSONHandler(w, opts)})
+	return slog.New(requestIDHandler{Handler: slog.NewJSONHandler(jsonEscaper{w}, opts)})
 }
 
 // requestIDHandler adds the request ID of the record's context (WithRequestID) to every line,
