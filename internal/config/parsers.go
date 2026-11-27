@@ -157,7 +157,8 @@ type entryCheck struct {
 }
 
 // parseChecked reads a comma-separated list setting whose every entry check takes. A value that looks
-// like a secret never reaches it: validate refuses it first (parseSecretKinds).
+// like a secret never reaches it: validate refuses it first (parseSecretKinds). On a refusal it returns
+// no list, which no caller misses: validate returns no Config once any setting is refused.
 func parseChecked(val Value, check entryCheck) ([]string, []error) {
 	list, at, err := parseEntries(val)
 	if err != nil {

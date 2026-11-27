@@ -1071,7 +1071,9 @@ func TestCIMDHostListsAreNormalizedAndRefusedWhileCIMDIsOff(t *testing.T) {
 	if c.CIMD {
 		t.Fatalf("CIMD off: %v", c.CIMD)
 	}
-	// Host lists with CIMD off would silently do nothing; both settings are named as given.
+	// Host lists with CIMD off would silently do nothing; both settings are named as given. A list
+	// counts whatever its entries, so one with a refused entry is refused for both (#635); a list of
+	// none only for its form (TestACIMDHostListOfNoneIsRefusedOnlyForItsForm).
 	for _, tc := range []struct {
 		args []string
 		env  []string
@@ -1079,6 +1081,8 @@ func TestCIMDHostListsAreNormalizedAndRefusedWhileCIMDIsOff(t *testing.T) {
 	}{
 		{nil, []string{"BYWARD_CIMD=false", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai"}, "BYWARD_CIMD_TRUSTED_HOSTS has no effect while BYWARD_CIMD is false; remove one of them"},
 		{[]string{"--cimd=false", "--cimd-allowed-hosts", "claude.ai"}, nil, "--cimd-allowed-hosts has no effect while --cimd is false; remove one of them"},
+		{nil, []string{"BYWARD_CIMD=false", "BYWARD_CIMD_TRUSTED_HOSTS=a b"}, "BYWARD_CIMD_TRUSTED_HOSTS has no effect while BYWARD_CIMD is false; remove one of them"},
+		{[]string{"--cimd=false", "--cimd-allowed-hosts", "claude"}, nil, "--cimd-allowed-hosts has no effect while --cimd is false; remove one of them"},
 	} {
 		if _, err := load(t, tc.args, tc.env...); !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%v %v: err = %v, want %q", tc.args, tc.env, err, tc.want)
