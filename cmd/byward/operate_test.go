@@ -125,7 +125,7 @@ func TestASettingWithACredentialStopsEveryCommandWithoutShowingIt(t *testing.T) 
 	entraEnv := func(t *testing.T) []string { return authEnv(t) }
 	// The OIDC issuer needs an oidc IdP.
 	oidcEnv := func(t *testing.T) []string {
-		return append(oidcAuthEnv(t), "BYWARD_IDP=oidc", "BYWARD_OIDC_CLIENT_ID=app", "BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
+		return append(oidcAuthEnv(authEnv(t)), "BYWARD_IDP=oidc", "BYWARD_OIDC_CLIENT_ID=app", "BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
 	}
 	// Each host is one no example text holds, so its absence shows the URL is never shown.
 	for _, tc := range []struct {

@@ -197,8 +197,8 @@ func LooksSecret(s string) bool {
 }
 
 // lookedAtMax is the longest string LooksSecret reads; a longer one is redacted unread, which only
-// ever hides more, so a request's path or an attribute an unauthenticated client controls costs at
-// most one read of 16 KiB (#657). It is above MaxStderrLine (8 KiB), so no stdio upstream's stderr
+// ever hides more, so a request's path or an attribute an unauthenticated client controls is read at
+// most 16 KiB long (#657). It is above MaxStderrLine (8 KiB), so no stdio upstream's stderr
 // line is affected. Config's refusal reads every value whole: only the redact grade is capped.
 const lookedAtMax = 16 << 10
 
@@ -216,7 +216,7 @@ func catalogueRefuses(s string) bool {
 		if ShownSecretKind(r) != "" {
 			return true
 		}
-		// A list shape shows each entry trimmed (a URL list's entry as MarkedURL shows it).
+		// A URL list shows each entry trimmed (config's splitList).
 		if entries := strings.Split(r, ","); (len(entries) > 1 || strings.TrimSpace(r) != r) && ShownListSecretKind(trimmed(entries)) != "" {
 			return true
 		}

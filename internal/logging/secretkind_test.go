@@ -257,7 +257,7 @@ func TestWhatConfigRefusesAsItShowsAValueIsRedacted(t *testing.T) {
 		}
 	}
 	// A URL list shows each entry trimmed, so a JWT cut short before white space is one there.
-	if jwt := "eyJ" + "hbGciOiJIUzI1NiJ9." + "eyJ" + "zdWIiOiJ4In0"; !LooksSecret(jwt+" ") || !LooksSecret("app.example,"+jwt+"\t") {
+	if jwt := "eyJ" + "hbGciOiJIUzI1NiJ9." + "eyJ" + "zdWIiOiJ4In0"; !LooksSecret(jwt+" ") || !LooksSecret("app.example,"+jwt+"\t") || !LooksSecret(jwt+"\v") || !LooksSecret(jwt+"\u0085") || !LooksSecret("app.example,"+jwt+"\u00a0") {
 		t.Errorf("a JWT cut short before white space, which a URL list shows trimmed, is not redacted")
 	}
 	for _, v := range []string{"postgres://u:pa, " + "ss@h", "postgres://u:pa,x/y," + "ss@h", "postgres://u\n:Q7Q7Q7," + "q x@h"} { // the last only as quoted
@@ -297,6 +297,18 @@ func TestShownSecretKindReadsAJSONDocumentByItsParts(t *testing.T) {
 		{"a token under a key given twice", `{"a":"` + fakeToken("ghp_") + `","a":"x"}`, "a GitHub token"},                              // every value of a duplicate key
 		{"a token in a nested document with a key given twice", `{"a":"{\"k\":\"` + fakeToken("ghp_") + `\"\u002c\"k\":1}"}`, "a GitHub token"},
 		{"a password key after a control character in a string", `{"m":"host=db\u000b` + `password=Q7Q7Q7"}`, passwordKind}, // each string read as config shows it (AsGiven)
+		{"an escaped space inside a URL's user part", `{"a":"postgres://u\u0020:` + "s3cretPW" + `@h/db"}`, passwordKind},   // each string read as written too, as main reads it
+		{"an escaped space ending a URL's password", `{"a":"postgres://u:` + "s3cretPW" + `\u0020@h/db"}`, passwordKind},
+		{"an escaped backslash before a password key", `{"conn":"Server=db\\` + `Password=s3cret"}`, passwordKind},
+		{"an escaped character between a password key and its =", `{"a":"password\u003b` + `=x"}`, passwordKind},
+		{"an escaped quote between a password key and its =", `{"a":"password\"` + `=x"}`, passwordKind},
+		// A credential cut across JSON structure is not found: the split rule needs the first string
+		// to end scheme://user:Y, Y neither empty nor all digits. Allowed by decision (#657): finding
+		// these would refuse a JSON line naming an origin and then an email, and none is a credential
+		// pasted as one.
+		{"allowed: a split before the :", `{"postgres://u":"` + "pw@h" + `"}`, ""},
+		{"allowed: a split at the :", `["postgres://u:","` + "pw@h" + `"]`, ""},
+		{"allowed: a split after an all-digit part", `["postgres://u:123","` + "4@h" + `"]`, ""},
 		{"two kinds, named by the first key", `{"a":"` + fakeToken("ghp_") + `","z":"` + dsn + `"}`, "a GitHub token"},
 		{"text before the JSON", `time=1 {"endpoint":"https://api.example.com:8443","user":"bob@x.example"}`, passwordKind},
 		{"a line cut short", `{"endpoint":"https://api.example.com:8443","user":"bob@x.example"`, passwordKind},
@@ -320,5 +332,12 @@ func TestLooksSecretReadsAtMost16KiB(t *testing.T) {
 	}
 	if !LooksSecret(strings.Repeat("x", 16<<10+1)) {
 		t.Error("a string of 16 KiB and one byte is kept, want it redacted unread")
+	}
+	if tok := fakeToken("ghp_"); !LooksSecret(strings.Repeat("x", 16<<10-len(tok)-1) + " " + tok) {
+		t.Error("a token in a string of exactly 16 KiB is kept, want it read and redacted")
+	}
+	// Unread: a longer string costs nothing, as the list and quoted readings would allocate.
+	if long := strings.Repeat("x,", 1<<19); testing.AllocsPerRun(10, func() { LooksSecret(long) }) != 0 {
+		t.Error("a string over 16 KiB is read, want it redacted unread")
 	}
 }

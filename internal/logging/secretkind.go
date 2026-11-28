@@ -174,7 +174,8 @@ func ShownListSecretKind(entries []string) string {
 // it but white space), by its parts: every key and every string, in the order the document holds
 // them, duplicate keys included, each as it would be shown on its own (AsGiven), read as a list's
 // entries are (ShownListSecretKind), so a string that is itself a JSON document is read by its parts
-// too, and a password split across two strings is found as one a comma split. Numbers, booleans
+// too, and a password split across two strings is found as one a comma split. Each string is also
+// read as written, with its JSON escapes, as text outside JSON is read. Numbers, booleans
 // and null hold no secret. JSON's own escapes (\" and \uXXXX) are undone by decoding. ok is false
 // for anything else, a line with text before its JSON or one cut short included, which is read as
 // text, as before: that reading can only find more (#657).
@@ -186,7 +187,7 @@ func jsonKind(shown string) (kind string, ok bool) {
 	dec := json.NewDecoder(strings.NewReader(doc))
 	dec.UseNumber() // a number is a token, never an error, however large
 	var parts []string
-	for {
+	for read := int64(0); ; read = dec.InputOffset() {
 		tok, err := dec.Token()
 		if err == io.EOF {
 			break
@@ -195,6 +196,15 @@ func jsonKind(shown string) (kind string, ok bool) {
 			return "", false
 		}
 		if s, isString := tok.(string); isString {
+			// The string as written too, its escapes undecoded, as a text reading reads them: an
+			// escape inside a URL's user part is a character of it, and one before a password key a
+			// break, as for a value outside JSON. It is read alone, so no match spans two strings;
+			// a string that is itself a JSON document is read by its parts only.
+			if _, isDoc := jsonKind(s); !isDoc {
+				if kind := ShownSecretKind(doc[read:dec.InputOffset()]); kind != "" {
+					return kind, true
+				}
+			}
 			parts = append(parts, AsGiven(s))
 		}
 	}

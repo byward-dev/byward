@@ -45,7 +45,7 @@ func TestTheWalkthroughsBrokenConfigurationsSayWhatToFix(t *testing.T) {
 		},
 			`byward: configuration error: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 2 of 3 (32 characters, not shown): it holds a "/" or a space; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
 		{"04 a log format mistyped", func(t *testing.T) []string {
-			return append(oidcAuthEnv(t), public, upstream, "BYWARD_IDP=okta",
+			return append(oidcAuthEnv(authEnv(t)), public, upstream, "BYWARD_IDP=okta",
 				"BYWARD_OIDC_ISSUER=https://example.okta.com/oauth2/aus1a2b3c4d5e6f7g8h9", "BYWARD_OIDC_CLIENT_ID=0oa1b2c3d4e5f6g7h8i9",
 				"BYWARD_GATE_GROUPS=mcp-users", "BYWARD_LOG_FORMAT=jsonn")
 		},
@@ -66,7 +66,7 @@ func TestTheWalkthroughsBrokenConfigurationsSayWhatToFix(t *testing.T) {
 		},
 			`byward: configuration error: BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 3 of 4 (14 characters, not shown): its prefix length is longer than /32, the length of an IPv4 address`},
 		{"08 a public URL with a query", func(t *testing.T) []string {
-			return append(oidcAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?env=prod", upstream,
+			return append(oidcAuthEnv(authEnv(t)), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?env=prod", upstream,
 				"BYWARD_IDP=google", "BYWARD_OIDC_CLIENT_ID=123456789012-abcdefghijklmnop.apps.googleusercontent.com",
 				"BYWARD_GATE_HOSTED_DOMAINS=example.com")
 		},
@@ -77,7 +77,7 @@ func TestTheWalkthroughsBrokenConfigurationsSayWhatToFix(t *testing.T) {
 		},
 			`byward: configuration error: BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID); got a value (23 characters, not shown): it looks like a domain name, not a GUID`},
 		{"10 an http issuer off loopback", func(t *testing.T) []string {
-			return append(oidcAuthEnv(t), public, upstream, "BYWARD_IDP=keycloak",
+			return append(oidcAuthEnv(authEnv(t)), public, upstream, "BYWARD_IDP=keycloak",
 				"BYWARD_OIDC_ISSUER=http://keycloak.example.net/realms/mcp", "BYWARD_OIDC_CLIENT_ID=byward-proxy", "BYWARD_GATE_ROLES=mcp-user")
 		},
 			`byward: configuration error: BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got http on a host that is not loopback: give https; an issuer is http only on a loopback host, with --dev`},

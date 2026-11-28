@@ -70,20 +70,17 @@ func authEnv(t *testing.T) []string {
 		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state"), "BYWARD_ASSERTION_KEYS_DIR=" + assertionkey.Dir(t)}
 }
 
-// oidcAuthEnv is authEnv for an oidc IdP: without the Entra settings, and with authEnv's secret file
-// as the client secret. The caller names the IdP, the client ID and, where the IdP needs one, the
+// oidcAuthEnv is an Entra env (authEnv or operatorEnv) made one for an oidc IdP: without the Entra
+// settings, and with their secret file as the client secret. The caller names the IdP, the client ID and, where the IdP needs one, the
 // issuer.
-func oidcAuthEnv(t *testing.T) []string {
-	t.Helper()
-	env := authEnv(t)
-	secret := setting(env, "BYWARD_ENTRA_CLIENT_SECRET_FILE")
-	return append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+secret)
+func oidcAuthEnv(env []string) []string {
+	return append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(env, "BYWARD_ENTRA_CLIENT_SECRET_FILE"))
 }
 
 // keycloakOperatorEnv is an Entra env (authEnv or operatorEnv) made one for a keycloak IdP that admits a user
 // with no group, with the Entra client secret as the oidc one, and extra after.
 func keycloakOperatorEnv(env []string, extra ...string) []string {
-	return append(append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(env, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
+	return append(append(oidcAuthEnv(env),
 		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true"), extra...)
 }
 
@@ -291,7 +288,7 @@ func TestDevModeLogsEachRelaxation(t *testing.T) {
 // (security invariant 12): #355's acceptance test, end to end from the settings.
 func TestDevModeLogsAnHTTPIdPIssuerOnLoopback(t *testing.T) {
 	const relaxation = "http IdP issuer on loopback (http://localhost:8180/realms/byward)"
-	env := append(oidcAuthEnv(t), "BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=http://localhost:8180/realms/byward", "BYWARD_OIDC_CLIENT_ID=byward",
+	env := append(oidcAuthEnv(authEnv(t)), "BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=http://localhost:8180/realms/byward", "BYWARD_OIDC_CLIENT_ID=byward",
 		"BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
 	if code, _, logs := runDone(nil, append(env, serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...)...); code != exitOK ||
 		!strings.Contains(logs, `"msg":"development mode relaxation","relaxation":"`+relaxation) {

@@ -26,10 +26,17 @@ var walkKinds = []string{"userinfo", "DSN key=value", "GitHub token", "Slack tok
 	"DSN in a JSON line", "password key after a vertical tab"}
 
 // walkOnlyForms are forms the walk pins but the other leak tests do not take: a DSN with
-// JSON-escaped slashes outside a JSON document, which no kind matches, so main shows it, and so does
-// this PR (a Known residual, #657); a fix shows up as a changed walk.golden line.
+// JSON-escaped slashes outside a JSON document, which no kind matches, so it is shown, as on main (a
+// Known residual, #657); a fix shows up as a changed walk.golden line.
 var walkOnlyForms = []struct{ name, value string }{
 	{"DSN with JSON-escaped slashes, outside JSON", `postgres:\/\/app:` + "LK7CANARY" + "@db.example/x"},
+	// Allowed by decision (#657), and pinned here so a reviewer sees each in the golden: a JSON line
+	// naming an origin and then an email, and a credential cut across JSON structure, which finding
+	// would refuse that line too.
+	{"JSON line naming an origin, then an email", `{"endpoint":"https://api.example.com","user":"` + "LK7CANARY" + `@example.com"}`},
+	{"password cut across JSON before the :", `{"postgres://u":"` + "LK7CANARY" + `@h"}`},
+	{"password cut across JSON at the :", `["postgres://u:","` + "LK7CANARY" + `@h"]`},
+	{"password cut across JSON after an all-digit part", `["postgres://u:123","4` + "LK7CANARY" + `@h"]`},
 }
 
 // walkSurface is one place byward prints a value it was given: run gives it v and returns the exit
@@ -158,8 +165,9 @@ func walkOutcome(code int, out string) string {
 // Every surface that prints a value it was given decides every kind of the catalogue as
 // testdata/walk.golden records (#657, the decision golden of AGENTS.md's Pinned tier). The cells a
 // surface shows are listed again in testdata/walk.shown, so a cell newly shown is a reviewed diff of
-// that file: today only the opaque Bearer credential, in each --print-config surface that shows the
-// value it was given (a Known gap, docs/security-posture.md).
+// that file: the opaque Bearer credential in each --print-config surface that shows the value it was
+// given (a Known gap, docs/security-posture.md), and walkOnlyForms' cells (a Known residual, or
+// allowed by decision, #657).
 // Regenerate with BYWARD_UPDATE_GOLDEN=1 and review both diffs.
 func TestEveryPrintingSurfaceDecidesEveryKindAsPinned(t *testing.T) {
 	t.Setenv("PGSSLMODE", "verify-full")
@@ -178,7 +186,7 @@ func TestEveryPrintingSurfaceDecidesEveryKindAsPinned(t *testing.T) {
 	}
 	var all, shown strings.Builder
 	all.WriteString("# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. surface | kind | outcome (#657)\n")
-	shown.WriteString("# Generated: the cells of walk.golden that show a value; each is a Known gap (docs/security-posture.md)\n")
+	shown.WriteString("# Generated: the cells of walk.golden that show a value; each is a Known gap (docs/security-posture.md), a Known residual or allowed by decision (#657)\n")
 	for _, s := range surfaces {
 		for _, form := range append(slices.Clone(secretForms), walkOnlyForms...) {
 			if !slices.Contains(walkKinds, form.name) && !slices.Contains(walkOnlyForms, form) {
@@ -196,7 +204,7 @@ func TestEveryPrintingSurfaceDecidesEveryKindAsPinned(t *testing.T) {
 		t.Errorf("the walk wrote %q to os.Stderr or the log package, want nothing", got)
 	}
 	golden.Check(t, "testdata/walk.golden", all.String(), "each line is one surface's decision for one kind (#657); a changed line is a changed decision, which walk.shown must show if it now shows a value")
-	golden.Check(t, "testdata/walk.shown", shown.String(), "a cell that newly shows a value is a new leak unless it is a Known gap in docs/security-posture.md")
+	golden.Check(t, "testdata/walk.shown", shown.String(), "a cell that newly shows a value is a new leak unless it is a Known gap in docs/security-posture.md, a Known residual or allowed by decision")
 }
 
 // The walk fails, by name, on a command or a flag of init that has no surface, and calls a surface

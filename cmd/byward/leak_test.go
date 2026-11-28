@@ -279,7 +279,7 @@ func leakContexts(t *testing.T, program string) map[string][]string {
 	httpServe := append(slices.Clone(listen), "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp") // an IP, so startup resolves no name
 	entra := append(authEnv(t), httpServe...)
 	command, _ := json.Marshal([]string{program}) // strings always marshal
-	oidcBase := append(oidcAuthEnv(t), httpServe...)
+	oidcBase := append(oidcAuthEnv(authEnv(t)), httpServe...)
 	oidc := append(slices.Clone(oidcBase), "BYWARD_IDP=oidc", "BYWARD_OIDC_ISSUER=https://idp.example", "BYWARD_OIDC_CLIENT_ID=abc",
 		"BYWARD_GATE_ALLOW_EMPTY=true")
 	dir := t.TempDir()

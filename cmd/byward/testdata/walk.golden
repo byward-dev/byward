@@ -10,6 +10,10 @@ startup log, a free-text setting | opaque Bearer credential | redacted
 startup log, a free-text setting | DSN in a JSON line | refused
 startup log, a free-text setting | password key after a vertical tab | refused
 startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON | shown
+startup log, a free-text setting | JSON line naming an origin, then an email | shown
+startup log, a free-text setting | password cut across JSON before the : | shown
+startup log, a free-text setting | password cut across JSON at the : | shown
+startup log, a free-text setting | password cut across JSON after an all-digit part | shown
 --print-config, a free-text setting | userinfo | refused
 --print-config, a free-text setting | DSN key=value | refused
 --print-config, a free-text setting | GitHub token | refused
@@ -21,6 +25,10 @@ startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON |
 --print-config, a free-text setting | DSN in a JSON line | refused
 --print-config, a free-text setting | password key after a vertical tab | refused
 --print-config, a free-text setting | DSN with JSON-escaped slashes, outside JSON | shown
+--print-config, a free-text setting | JSON line naming an origin, then an email | shown
+--print-config, a free-text setting | password cut across JSON before the : | shown
+--print-config, a free-text setting | password cut across JSON at the : | shown
+--print-config, a free-text setting | password cut across JSON after an all-digit part | shown
 --print-config, a URL setting's path | userinfo | kept out
 --print-config, a URL setting's path | DSN key=value | refused
 --print-config, a URL setting's path | GitHub token | refused
@@ -32,6 +40,10 @@ startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON |
 --print-config, a URL setting's path | DSN in a JSON line | kept out
 --print-config, a URL setting's path | password key after a vertical tab | refused
 --print-config, a URL setting's path | DSN with JSON-escaped slashes, outside JSON | kept out
+--print-config, a URL setting's path | JSON line naming an origin, then an email | kept out
+--print-config, a URL setting's path | password cut across JSON before the : | kept out
+--print-config, a URL setting's path | password cut across JSON at the : | kept out
+--print-config, a URL setting's path | password cut across JSON after an all-digit part | kept out
 --print-config, a list setting's entry | userinfo | refused
 --print-config, a list setting's entry | DSN key=value | refused
 --print-config, a list setting's entry | GitHub token | refused
@@ -43,6 +55,10 @@ startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON |
 --print-config, a list setting's entry | DSN in a JSON line | refused
 --print-config, a list setting's entry | password key after a vertical tab | refused
 --print-config, a list setting's entry | DSN with JSON-escaped slashes, outside JSON | refused
+--print-config, a list setting's entry | JSON line naming an origin, then an email | refused
+--print-config, a list setting's entry | password cut across JSON before the : | refused
+--print-config, a list setting's entry | password cut across JSON at the : | refused
+--print-config, a list setting's entry | password cut across JSON after an all-digit part | refused
 --print-config, a URL list setting's entry | userinfo | kept out
 --print-config, a URL list setting's entry | DSN key=value | refused
 --print-config, a URL list setting's entry | GitHub token | refused
@@ -54,6 +70,10 @@ startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON |
 --print-config, a URL list setting's entry | DSN in a JSON line | kept out
 --print-config, a URL list setting's entry | password key after a vertical tab | kept out
 --print-config, a URL list setting's entry | DSN with JSON-escaped slashes, outside JSON | kept out
+--print-config, a URL list setting's entry | JSON line naming an origin, then an email | refused
+--print-config, a URL list setting's entry | password cut across JSON before the : | kept out
+--print-config, a URL list setting's entry | password cut across JSON at the : | refused
+--print-config, a URL list setting's entry | password cut across JSON after an all-digit part | refused
 --print-config, a path setting | userinfo | refused
 --print-config, a path setting | DSN key=value | refused
 --print-config, a path setting | GitHub token | refused
@@ -65,6 +85,10 @@ startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON |
 --print-config, a path setting | DSN in a JSON line | refused
 --print-config, a path setting | password key after a vertical tab | refused
 --print-config, a path setting | DSN with JSON-escaped slashes, outside JSON | shown
+--print-config, a path setting | JSON line naming an origin, then an email | refused
+--print-config, a path setting | password cut across JSON before the : | refused
+--print-config, a path setting | password cut across JSON at the : | refused
+--print-config, a path setting | password cut across JSON after an all-digit part | refused
 --print-config, the stdio upstream's program | userinfo | refused
 --print-config, the stdio upstream's program | DSN key=value | refused
 --print-config, the stdio upstream's program | GitHub token | refused
@@ -76,6 +100,10 @@ startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON |
 --print-config, the stdio upstream's program | DSN in a JSON line | refused
 --print-config, the stdio upstream's program | password key after a vertical tab | refused
 --print-config, the stdio upstream's program | DSN with JSON-escaped slashes, outside JSON | shown
+--print-config, the stdio upstream's program | JSON line naming an origin, then an email | refused
+--print-config, the stdio upstream's program | password cut across JSON before the : | refused
+--print-config, the stdio upstream's program | password cut across JSON at the : | refused
+--print-config, the stdio upstream's program | password cut across JSON after an all-digit part | refused
 check --offline, a free-text setting | userinfo | refused
 check --offline, a free-text setting | DSN key=value | refused
 check --offline, a free-text setting | GitHub token | refused
@@ -87,6 +115,10 @@ check --offline, a free-text setting | opaque Bearer credential | kept out
 check --offline, a free-text setting | DSN in a JSON line | refused
 check --offline, a free-text setting | password key after a vertical tab | refused
 check --offline, a free-text setting | DSN with JSON-escaped slashes, outside JSON | kept out
+check --offline, a free-text setting | JSON line naming an origin, then an email | kept out
+check --offline, a free-text setting | password cut across JSON before the : | kept out
+check --offline, a free-text setting | password cut across JSON at the : | kept out
+check --offline, a free-text setting | password cut across JSON after an all-digit part | kept out
 doctor, a free-text setting | userinfo | refused
 doctor, a free-text setting | DSN key=value | refused
 doctor, a free-text setting | GitHub token | refused
@@ -98,6 +130,10 @@ doctor, a free-text setting | opaque Bearer credential | kept out
 doctor, a free-text setting | DSN in a JSON line | refused
 doctor, a free-text setting | password key after a vertical tab | refused
 doctor, a free-text setting | DSN with JSON-escaped slashes, outside JSON | kept out
+doctor, a free-text setting | JSON line naming an origin, then an email | kept out
+doctor, a free-text setting | password cut across JSON before the : | kept out
+doctor, a free-text setting | password cut across JSON at the : | kept out
+doctor, a free-text setting | password cut across JSON after an all-digit part | kept out
 init entra --tenant | userinfo | refused
 init entra --tenant | DSN key=value | refused
 init entra --tenant | GitHub token | refused
@@ -109,6 +145,10 @@ init entra --tenant | opaque Bearer credential | refused
 init entra --tenant | DSN in a JSON line | refused
 init entra --tenant | password key after a vertical tab | refused
 init entra --tenant | DSN with JSON-escaped slashes, outside JSON | refused
+init entra --tenant | JSON line naming an origin, then an email | refused
+init entra --tenant | password cut across JSON before the : | refused
+init entra --tenant | password cut across JSON at the : | refused
+init entra --tenant | password cut across JSON after an all-digit part | refused
 init entra --public-url, in its path | userinfo | refused
 init entra --public-url, in its path | DSN key=value | refused
 init entra --public-url, in its path | GitHub token | refused
@@ -120,6 +160,10 @@ init entra --public-url, in its path | opaque Bearer credential | refused
 init entra --public-url, in its path | DSN in a JSON line | refused
 init entra --public-url, in its path | password key after a vertical tab | refused
 init entra --public-url, in its path | DSN with JSON-escaped slashes, outside JSON | shown
+init entra --public-url, in its path | JSON line naming an origin, then an email | refused
+init entra --public-url, in its path | password cut across JSON before the : | refused
+init entra --public-url, in its path | password cut across JSON at the : | refused
+init entra --public-url, in its path | password cut across JSON after an all-digit part | refused
 init entra --upstream-url, in its query | userinfo | refused
 init entra --upstream-url, in its query | DSN key=value | refused
 init entra --upstream-url, in its query | GitHub token | refused
@@ -131,6 +175,10 @@ init entra --upstream-url, in its query | opaque Bearer credential | refused
 init entra --upstream-url, in its query | DSN in a JSON line | refused
 init entra --upstream-url, in its query | password key after a vertical tab | refused
 init entra --upstream-url, in its query | DSN with JSON-escaped slashes, outside JSON | shown
+init entra --upstream-url, in its query | JSON line naming an origin, then an email | refused
+init entra --upstream-url, in its query | password cut across JSON before the : | refused
+init entra --upstream-url, in its query | password cut across JSON at the : | refused
+init entra --upstream-url, in its query | password cut across JSON after an all-digit part | refused
 init entra --secret-years | userinfo | refused
 init entra --secret-years | DSN key=value | refused
 init entra --secret-years | GitHub token | refused
@@ -142,6 +190,10 @@ init entra --secret-years | opaque Bearer credential | refused
 init entra --secret-years | DSN in a JSON line | refused
 init entra --secret-years | password key after a vertical tab | refused
 init entra --secret-years | DSN with JSON-escaped slashes, outside JSON | refused
+init entra --secret-years | JSON line naming an origin, then an email | refused
+init entra --secret-years | password cut across JSON before the : | refused
+init entra --secret-years | password cut across JSON at the : | refused
+init entra --secret-years | password cut across JSON after an all-digit part | refused
 init entra --credential | userinfo | refused
 init entra --credential | DSN key=value | refused
 init entra --credential | GitHub token | refused
@@ -153,6 +205,10 @@ init entra --credential | opaque Bearer credential | refused
 init entra --credential | DSN in a JSON line | refused
 init entra --credential | password key after a vertical tab | refused
 init entra --credential | DSN with JSON-escaped slashes, outside JSON | refused
+init entra --credential | JSON line naming an origin, then an email | refused
+init entra --credential | password cut across JSON before the : | refused
+init entra --credential | password cut across JSON at the : | refused
+init entra --credential | password cut across JSON after an all-digit part | refused
 revoke-user under oidc, the user key | userinfo | redacted
 revoke-user under oidc, the user key | DSN key=value | redacted
 revoke-user under oidc, the user key | GitHub token | redacted
@@ -164,6 +220,10 @@ revoke-user under oidc, the user key | opaque Bearer credential | redacted
 revoke-user under oidc, the user key | DSN in a JSON line | redacted
 revoke-user under oidc, the user key | password key after a vertical tab | refused
 revoke-user under oidc, the user key | DSN with JSON-escaped slashes, outside JSON | shown
+revoke-user under oidc, the user key | JSON line naming an origin, then an email | shown
+revoke-user under oidc, the user key | password cut across JSON before the : | shown
+revoke-user under oidc, the user key | password cut across JSON at the : | shown
+revoke-user under oidc, the user key | password cut across JSON after an all-digit part | shown
 a log attribute, JSON | userinfo | redacted
 a log attribute, JSON | DSN key=value | redacted
 a log attribute, JSON | GitHub token | redacted
@@ -175,6 +235,10 @@ a log attribute, JSON | opaque Bearer credential | redacted
 a log attribute, JSON | DSN in a JSON line | redacted
 a log attribute, JSON | password key after a vertical tab | redacted
 a log attribute, JSON | DSN with JSON-escaped slashes, outside JSON | shown
+a log attribute, JSON | JSON line naming an origin, then an email | shown
+a log attribute, JSON | password cut across JSON before the : | shown
+a log attribute, JSON | password cut across JSON at the : | shown
+a log attribute, JSON | password cut across JSON after an all-digit part | shown
 a log attribute, text | userinfo | redacted
 a log attribute, text | DSN key=value | redacted
 a log attribute, text | GitHub token | redacted
@@ -186,6 +250,10 @@ a log attribute, text | opaque Bearer credential | redacted
 a log attribute, text | DSN in a JSON line | redacted
 a log attribute, text | password key after a vertical tab | redacted
 a log attribute, text | DSN with JSON-escaped slashes, outside JSON | shown
+a log attribute, text | JSON line naming an origin, then an email | shown
+a log attribute, text | password cut across JSON before the : | shown
+a log attribute, text | password cut across JSON at the : | shown
+a log attribute, text | password cut across JSON after an all-digit part | shown
 a stdio upstream's stderr line, as stdio logs it | userinfo | redacted
 a stdio upstream's stderr line, as stdio logs it | DSN key=value | redacted
 a stdio upstream's stderr line, as stdio logs it | GitHub token | redacted
@@ -197,3 +265,7 @@ a stdio upstream's stderr line, as stdio logs it | opaque Bearer credential | re
 a stdio upstream's stderr line, as stdio logs it | DSN in a JSON line | redacted
 a stdio upstream's stderr line, as stdio logs it | password key after a vertical tab | redacted
 a stdio upstream's stderr line, as stdio logs it | DSN with JSON-escaped slashes, outside JSON | shown
+a stdio upstream's stderr line, as stdio logs it | JSON line naming an origin, then an email | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON before the : | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON at the : | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON after an all-digit part | shown
