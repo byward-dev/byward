@@ -79,8 +79,11 @@ func (b *Broker) token(w http.ResponseWriter, r *http.Request) {
 // onRefused, when set, runs before the 401 with the grant_revoked reason (refusalReason) if the
 // client was definitely refused. Refresh, code redemption and /revoke use it to revoke the grant
 // behind what the refused client presents, when that grant is its own.
-func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now time.Time, onRefused func(r *http.Request, clientID string, now time.Time, why string)) (registration.Client, bool) {
-	ctx := r.Context()
+//
+// ctx is the context the lookup and the authentication run on: the request's at /token, a detached
+// one at /revoke, whose revocation must not be lost to the request's end (#693). Whether the
+// request ended is read from r.
+func (b *Broker) authenticateClient(ctx context.Context, w http.ResponseWriter, r *http.Request, now time.Time, onRefused func(r *http.Request, clientID string, now time.Time, why string)) (registration.Client, bool) {
 	f := r.PostForm
 	clientID := f.Get("client_id")
 	if user, _, ok := r.BasicAuth(); ok {
@@ -169,7 +172,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f := r.PostForm
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedCode)
+	client, ok := b.authenticateClient(ctx, w, r, now, b.revokeForRefusedCode)
 	if !ok {
 		return
 	}

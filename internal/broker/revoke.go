@@ -40,7 +40,12 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedRevocation)
+	// Detached: a revocation whose form was read finishes whatever the request's end, so a client
+	// that closes as it signs out, or a shutdown, cannot leave the grant live in the store. The
+	// client's lookup is part of it: a DCR client's is a store read (#693).
+	ctx, cancel := detached(r.Context())
+	defer cancel()
+	client, ok := b.authenticateClient(ctx, w, r, now, b.revokeForRefusedRevocation)
 	if !ok {
 		return
 	}
@@ -49,10 +54,6 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_request", "token is required"})
 		return
 	}
-	// Detached: a revocation whose form was read finishes whatever the request's end, so a client
-	// that goes away, or a shutdown, cannot leave the grant live in the store (#693).
-	ctx, cancel := detached(r.Context())
-	defer cancel()
 	grantID, owner, err := b.tokenGrant(ctx, tok, now)
 	if err != nil {
 		b.unavailable(w, r, "looking up a token to revoke failed", err)
@@ -68,6 +69,9 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.revoked(r, client.ID(), grantID, "the client revoked a token (RFC 7009)")
+	}
+	if shutdown.AnswerIfEnded(w, r) { // the revocation is done; an ended request is answered by how it ended
+		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)

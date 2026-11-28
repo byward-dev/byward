@@ -430,12 +430,19 @@ func (e *env) redeemWithoutRefresh(t *testing.T, code string) {
 	}
 }
 
-func (e *env) redeem(t *testing.T, code string, override url.Values) (*http.Response, map[string]any) {
-	t.Helper()
+// redeemForm is the /token form that redeems code as the static client, with override's fields
+// in place of its own.
+func redeemForm(code string, override url.Values) url.Values {
 	f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {clientCB}, "client_id": {clientID}, "code_verifier": {verifier}}
 	for k, v := range override {
 		f[k] = v
 	}
+	return f
+}
+
+func (e *env) redeem(t *testing.T, code string, override url.Values) (*http.Response, map[string]any) {
+	t.Helper()
+	f := redeemForm(code, override)
 	var res *http.Response
 	if u := f.Get("__basic"); u != "" {
 		f.Del("__basic")

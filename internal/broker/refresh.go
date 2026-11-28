@@ -22,7 +22,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f := r.PostForm
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedRefresh)
+	client, ok := b.authenticateClient(ctx, w, r, now, b.revokeForRefusedRefresh)
 	if !ok {
 		return
 	}

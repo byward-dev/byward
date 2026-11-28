@@ -2,6 +2,8 @@ package broker
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -19,16 +21,6 @@ import (
 // never logged as a failed one.
 func TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore(t *testing.T) {
 	const badCB = "https://bad.example/cb"
-	redeemForm := func(code string, override url.Values) url.Values {
-		f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {clientCB}, "client_id": {clientID}, "code_verifier": {verifier}}
-		for k, v := range override {
-			f[k] = v
-		}
-		return f
-	}
-	refreshForm := func(rt, client string) url.Values {
-		return url.Values{"grant_type": {"refresh_token"}, "refresh_token": {rt}, "client_id": {client}}
-	}
 	offlineCode := func(t *testing.T, e *env, extra url.Values) string {
 		q := url.Values{"scope": {"mcp offline_access"}}
 		for k, v := range extra {
@@ -97,11 +89,12 @@ func TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore(t *testi
 				e.st.SQLContext()
 				ctx, stop := end.Start(t.Context())
 				t.Cleanup(stop)
-				e.st.AfterCall(tc.after, stop)
-				e.st.AfterCall("RevokeGrant", func() {
+				e.st.AfterCall(tc.after, func(context.Context) { stop() })
+				e.st.AfterCall("RevokeGrant", func(call context.Context) {
 					if ctx.Err() == nil {
 						t.Error("the grant was revoked before the request ended: the cell tests nothing")
 					}
+					wantBounded(t, call)
 				})
 				e.serveIn(ctx, formRequest(path, strings.NewReader(form.Encode())))
 				if ctx.Err() == nil {
@@ -122,10 +115,10 @@ func TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore(t *testi
 }
 
 // A DCR client whose code redemption ends once its tokens are issued, as its client going away or
-// the proxy's shutdown, still has its registration renewed and marked used: recordUse runs detached,
-// so the client neither lapses nor is collected as never used (ADR-0008 §3, #693). An availability
-// guarantee: a lost renewal makes the client register again.
-func TestADCRClientWhoseRedemptionEndsStillHasItsRegistrationRenewed(t *testing.T) {
+// the proxy's shutdown, still has its use recorded: recordUse runs detached, so the client is not
+// collected as never used, and its registration slides when due (ADR-0008 §3, #693). An
+// availability guarantee: a lost use makes the client register again.
+func TestADCRClientWhoseRedemptionEndsIsStillMarkedUsed(t *testing.T) {
 	const cb = "https://app.example/cb"
 	for _, end := range lifecycle.ContextEndings {
 		t.Run(end.Ending.String(), func(t *testing.T) {
@@ -135,8 +128,8 @@ func TestADCRClientWhoseRedemptionEndsStillHasItsRegistrationRenewed(t *testing.
 			e.st.SQLContext()
 			ctx, stop := end.Start(t.Context())
 			t.Cleanup(stop)
-			e.st.AfterCall("Grant", stop) // the grant's identity claims: the last store call before recordUse
-			f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {cb}, "client_id": {id}, "code_verifier": {verifier}}
+			e.st.AfterCall("Grant", func(context.Context) { stop() }) // the grant's identity claims: the last store call before recordUse
+			f := redeemForm(code, url.Values{"client_id": {id}, "redirect_uri": {cb}})
 			e.serveIn(ctx, formRequest("/token", strings.NewReader(f.Encode())))
 			if ctx.Err() == nil {
 				t.Fatal("the request never ended: Grant was not called")
@@ -166,5 +159,82 @@ func TestADetachedCallOutlivesItsRequestAndEndsWithinFiveSeconds(t *testing.T) {
 	deadline, ok := ctx.Deadline()
 	if !ok || deadline.Before(before.Add(5*time.Second)) || deadline.After(time.Now().Add(5*time.Second)) {
 		t.Errorf("deadline %v (set: %v), want 5 s after the call", deadline, ok)
+	}
+}
+
+// A DCR client that revokes its token at /revoke as it closes, or as the proxy shuts down, still ends
+// its grant: its own lookup is a store read, and it runs detached with the revocation (#693). The
+// answer then follows the ending (shutdown.AnswerIfEnded), after the revocation.
+func TestADCRClientsRevocationOnARequestThatEndedStillEndsItsGrant(t *testing.T) {
+	for _, end := range lifecycle.ContextEndings {
+		t.Run(end.Ending.String(), func(t *testing.T) {
+			e := newEnv(t, withDCR(nil))
+			c := dcrSignInTo(t, e, "https://app.example/cb")
+			grantID := lastGrant(e.st)
+			e.st.SQLContext()
+			e.st.AfterCall("RevokeGrant", func(call context.Context) { wantBounded(t, call) })
+			f := url.Values{"token": {c.tokens["refresh_token"].(string)}, "client_id": {c.clientID}}
+			w := e.serveIn(endedCtx(end), formRequest("/revoke", strings.NewReader(f.Encode())))
+			end.Answered(t, w)
+			if !e.grantGone(t, grantID) {
+				t.Errorf("grant %s is still in the store", grantID)
+			}
+			if revs := e.auditEvents(t, "grant_revoked"); len(revs) != 1 || revs[0]["grant_id"] != grantID {
+				t.Errorf("grant_revoked events %v; want one for grant %s", revs, grantID)
+			}
+		})
+	}
+}
+
+// wantBounded fails t unless call, a store call's context, has a deadline at most 5 s away: a
+// revocation detached from its request is still bounded, so a stuck store cannot hold it past the
+// shutdown grace.
+func wantBounded(t *testing.T, call context.Context) {
+	t.Helper()
+	if deadline, ok := call.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
+		t.Errorf("a revocation's store call has deadline %v (set: %v), want one at most 5 s away", deadline, ok)
+	}
+}
+
+// replayChecked is a client whose authentication spends its assertion in the store, as a
+// private_key_jwt client's does (registration.StoreJTICache): it fails on an ended context, as
+// that store call does on a SQL store.
+type replayChecked struct{ registration.Client }
+
+func (c replayChecked) Authenticate(ctx context.Context, f url.Values, h http.Header, endpoint string, now time.Time) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("%w: %v", registration.ErrReplayCheckUnavailable, ctx.Err())
+	}
+	return c.Client.Authenticate(ctx, f, h, endpoint, now)
+}
+
+// replayCheckedClients resolves every client as replayChecked.
+type replayCheckedClients struct{ registration.Registry }
+
+func (r replayCheckedClients) Client(ctx context.Context, id string) (registration.Client, error) {
+	c, err := r.Registry.Client(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return replayChecked{c}, nil
+}
+
+// A client whose authentication is a store call (a private_key_jwt assertion's replay check) still
+// ends its grant at /revoke when its request has ended: the authentication runs detached with the
+// revocation (#693).
+func TestARevocationWhoseClientAuthenticationIsAStoreCallStillEndsItsGrant(t *testing.T) {
+	for _, end := range lifecycle.ContextEndings {
+		t.Run(end.Ending.String(), func(t *testing.T) {
+			e := newEnv(t)
+			rt := e.offline(t)["refresh_token"].(string)
+			grantID := lastGrant(e.st)
+			e.b.cfg.Clients = replayCheckedClients{e.b.cfg.Clients}
+			e.st.SQLContext()
+			f := url.Values{"token": {rt}, "client_id": {clientID}}
+			end.Answered(t, e.serveIn(endedCtx(end), formRequest("/revoke", strings.NewReader(f.Encode()))))
+			if !e.grantGone(t, grantID) {
+				t.Errorf("grant %s is still in the store", grantID)
+			}
+		})
 	}
 }

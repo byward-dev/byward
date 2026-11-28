@@ -362,13 +362,12 @@ func TestARefusedClientWhoseRequestEndedStillLosesItsGrant(t *testing.T) {
 	// Each surface readies what the client presents and returns its path and form.
 	surfaces := map[string]func(t *testing.T, c refusable) (string, url.Values){
 		"a code": func(t *testing.T, c refusable) (string, url.Values) {
-			return "/token", url.Values{"grant_type": {"authorization_code"}, "code": {c.signIn(t)}, "redirect_uri": {c.d.Redirect},
-				"client_id": {c.d.ClientID}, "code_verifier": {verifier}}
+			return "/token", redeemForm(c.signIn(t), url.Values{"client_id": {c.d.ClientID}, "redirect_uri": {c.d.Redirect}})
 		},
 		"a refresh token": func(t *testing.T, c refusable) (string, url.Values) {
-			return "/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {c.tokens(t, c.signIn(t))["refresh_token"].(string)}, "client_id": {c.d.ClientID}}
+			return "/token", refreshForm(c.tokens(t, c.signIn(t))["refresh_token"].(string), c.d.ClientID)
 		},
-		"a revocation": func(t *testing.T, c refusable) (string, url.Values) {
+		"a token at /revoke": func(t *testing.T, c refusable) (string, url.Values) {
 			return "/revoke", url.Values{"token": {c.tokens(t, c.signIn(t))["refresh_token"].(string)}, "client_id": {c.d.ClientID}}
 		},
 	}
@@ -381,6 +380,7 @@ func TestARefusedClientWhoseRequestEndedStillLosesItsGrant(t *testing.T) {
 					grantID := c.onlyGrant(t)
 					c.refuse()
 					c.e.st.SQLContext()
+					c.e.st.AfterCall("RevokeGrant", func(call context.Context) { wantBounded(t, call) })
 					c.e.serveIn(endedCtx(end), formRequest(path, strings.NewReader(f.Encode())))
 					c.wantOneRevocation(t, grantID)
 				})

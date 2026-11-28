@@ -40,13 +40,18 @@ func (e *env) offline(t *testing.T) map[string]any {
 	return body
 }
 
+// refreshForm is the /token form that refreshes rt as client.
+func refreshForm(rt, client string) url.Values {
+	return url.Values{"grant_type": {"refresh_token"}, "refresh_token": {rt}, "client_id": {client}}
+}
+
 // refresh posts grant_type=refresh_token for client (clientID if empty).
 func (e *env) refresh(t *testing.T, rt, client string) (*http.Response, map[string]any) {
 	t.Helper()
 	if client == "" {
 		client = clientID
 	}
-	res := e.do(t, "POST", "/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {rt}, "client_id": {client}}, nil)
+	res := e.do(t, "POST", "/token", refreshForm(rt, client), nil)
 	var body map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&body)
 	return res, body

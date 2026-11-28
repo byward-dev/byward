@@ -69,7 +69,7 @@ func TestAfterCallRefusesAnUnknownMethod(t *testing.T) {
 			t.Error("AfterCall with an unknown method name did not panic")
 		}
 	}()
-	New().AfterCall("Grnat", func() {})
+	New().AfterCall("Grnat", func(context.Context) {})
 }
 
 // A name that is not a store.Store method is refused, so a typo cannot silently inject nothing.
@@ -128,8 +128,14 @@ func TestEveryMethodHonoursSQLContextAndAfterCall(t *testing.T) {
 				other = "Consent"
 			}
 			own, others := 0, 0
-			s.AfterCall(name, func() { own++ })
-			s.AfterCall(other, func() { others++ })
+			s.AfterCall(name, func(context.Context) { own++ })
+			s.AfterCall(other, func(context.Context) { others++ })
+			s.Fail(errBoom, name)
+			_ = call(s, name)
+			if own != 0 {
+				t.Errorf("AfterCall: %s ran its hook although Fail failed the call first", name)
+			}
+			s.Fail(nil, name)
 			_ = call(s, name)
 			if own != 1 || others != 0 {
 				t.Errorf("AfterCall: %s ran its own hook %d times and %s's %d times, want 1 and 0", name, own, other, others)
