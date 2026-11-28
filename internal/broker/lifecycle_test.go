@@ -353,18 +353,21 @@ func (e *env) callbackFinished(t *testing.T, end lifecycle.Ended, w *httptest.Re
 }
 
 // A refused client is refused whether or not its request has ended: only a lookup that waited
-// (ErrUnavailable) is answered by how its request ended, so a refused document still revokes the
-// grant behind the presented refresh token (draft -03 §6.1; #672).
+// (ErrUnavailable) is answered by how its request ended, so each refusal that ends a grant
+// (refusals: the denylist, a refused document) still revokes the grant behind the presented refresh
+// token (draft -03 §6.1; #338; #672).
 func TestARefusedClientWhoseRequestEndedStillLosesItsGrant(t *testing.T) {
-	for _, end := range lifecycle.ContextEndings {
-		t.Run(end.Ending.String(), func(t *testing.T) {
-			e, d, mode, tokens := offlineCIMD(t)
-			mode.Store(modeRefused)
-			f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
-			e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
-			if got := e.auditEvents(t, "grant_revoked"); len(got) != 1 {
-				t.Fatalf("grant_revoked audited %d times; want the refused client's grant revoked once", len(got))
-			}
-		})
+	for name, refusal := range refusals {
+		for _, end := range lifecycle.ContextEndings {
+			t.Run(name+"/"+end.Ending.String(), func(t *testing.T) {
+				c := refusal(t)
+				tokens := c.tokens(t, c.signIn(t))
+				grantID := c.onlyGrant(t)
+				c.refuse()
+				f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {c.d.ClientID}}
+				c.e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
+				c.wantOneRevocation(t, grantID)
+			})
+		}
 	}
 }
