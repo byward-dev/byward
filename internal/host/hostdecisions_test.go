@@ -13,9 +13,18 @@ import (
 // lower-cases first); the decisions it feeds (the no-auth check, the http public URL and issuer on
 // loopback, a discovered endpoint in --dev) have columns of their own.
 func TestLoopbackAsWrittenDecidesEveryHostFamilyAsPinned(t *testing.T) {
-	hostfamilies.Run(t, "internal/host", []hostfamilies.Column{
+	hostfamilies.Run(t, "internal/host", hostColumns(t))
+}
+
+// FuzzHostDecisions fuzzes the host each of these checks reads, beyond the golden's families (#661):
+// see hostfamilies.Fuzz for what it fails.
+func FuzzHostDecisions(f *testing.F) { hostfamilies.Fuzz(f, hostColumns, Split, Serialize) }
+
+// hostColumns are the checks the golden test and FuzzHostDecisions judge.
+func hostColumns(testing.TB) []hostfamilies.Column {
+	return []hostfamilies.Column{
 		{Name: "loopback as written", Probes: hostfamilies.HostProbes(), Judge: func(in string) (bool, string) {
 			return LoopbackAsWritten(Hostname(in)), "not loopback"
-		}},
-	})
+		}}, // not a list: all of 127.0.0.0/8 is loopback
+	}
 }

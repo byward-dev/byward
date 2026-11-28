@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/ssrfguard"
 	"github.com/byward-dev/byward/internal/testutil/hostfamilies"
 )
@@ -26,6 +27,15 @@ func (selfDoc) Get(_ context.Context, url string, _ int64) (*ssrfguard.Response,
 // by name (#656). In the CIMD client ID and allowed host columns, a client ID passes when it reaches
 // the fetch: every check before it took it.
 func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
+	hostfamilies.Run(t, "internal/registration", hostColumns(t))
+}
+
+// FuzzHostDecisions fuzzes the host each of these checks reads, beyond the golden's families (#661):
+// see hostfamilies.Fuzz for what it fails.
+func FuzzHostDecisions(f *testing.F) { hostfamilies.Fuzz(f, hostColumns, host.Split, host.Serialize) }
+
+// hostColumns are the checks the golden test and FuzzHostDecisions judge.
+func hostColumns(t testing.TB) []hostfamilies.Column {
 	reaches := func(cfg CIMDConfig) func(string) (bool, string) {
 		f := &fakeFetch{}
 		cfg.Fetch, cfg.Now = f, time.Now
@@ -73,9 +83,9 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 		}
 		return err == nil, "refused"
 	}
-	hostfamilies.Run(t, "internal/registration", []hostfamilies.Column{
+	return []hostfamilies.Column{
 		{Name: "CIMD client ID", Probes: ids, Judge: reaches(CIMDConfig{})},
-		{Name: "CIMD allowed host", Probes: ids, Judge: reaches(CIMDConfig{AllowedHosts: []string{"mcp.example.com", "app.example"}, TrustedHosts: []string{"xn--bcher-kva.example"}})},
+		{Name: "CIMD allowed host", Probes: ids, Judge: reaches(CIMDConfig{AllowedHosts: []string{"mcp.example.com", "app.example"}, TrustedHosts: []string{"xn--bcher-kva.example"}}), Lists: true},
 		// A client passes when the registry vouches for it (Verified), which only a trusted host's does:
 		// an allowed one, as production lists both, is not.
 		{Name: "CIMD trusted host", Probes: ids, Judge: func() func(string) (bool, string) {
@@ -87,7 +97,7 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 				}
 				return c.Trust() == Verified, "trust " + string(c.Trust())
 			}
-		}()},
+		}(), Lists: true},
 		// An entry judged by the denylist alone, before config's refusals, since the denylist is the full rule.
 		{Name: "denylist entry", Probes: append(hostfamilies.HostProbes(), ids...), Judge: func(in string) (bool, string) {
 			_, err := NewDenylist([]string{in})
@@ -116,5 +126,5 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 		{Name: "consent redirect key", Probes: redirectURIs, Judge: func(in string) (bool, string) {
 			return ValidateRedirect(in) == nil && RedirectKey(in) != in, "compared as written"
 		}},
-	})
+	}
 }

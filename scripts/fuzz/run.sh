@@ -4,7 +4,10 @@
 # editing the workflow. Every target runs even after one fails; a failing input Go wrote under a
 # package's testdata/fuzz/ is copied under build/fuzz/crashers/ at its repository path, for the
 # workflow to upload, and the lane fails.
-#   FUZZTIME=2m sh scripts/fuzz/run.sh        (mise run test:fuzz)
+# FUZZMATCH picks the targets instead (a go test -list pattern). Unset, every target but the host
+# decision targets (FuzzHostDecisions, #661) runs: those are run on demand, not in CI.
+#   FUZZTIME=2m sh scripts/fuzz/run.sh                       (mise run test:fuzz)
+#   FUZZMATCH='^FuzzHostDecisions$' FUZZTIME=60s sh scripts/fuzz/run.sh (mise run test:fuzz:host)
 set -eu
 
 fail() {
@@ -13,6 +16,9 @@ fail() {
 }
 [ -f go.mod ] || fail "run from the repository root"
 fuzztime=${FUZZTIME:-2m}
+match=${FUZZMATCH:-^Fuzz}
+skip=
+[ -n "${FUZZMATCH:-}" ] || skip='^FuzzHostDecisions$'
 out=build/fuzz/crashers
 mkdir -p build/fuzz
 rm -rf "$out"
@@ -20,13 +26,13 @@ mkdir -p "$out"
 
 # "package target" lines: go test -list prints a package's matching names, then its "ok" line.
 # Go reports a build or setup failure on stdout, so show the listing when it fails.
-go test -list '^Fuzz' ./... >build/fuzz/list || {
+go test -list "$match" ./... >build/fuzz/list || {
   cat build/fuzz/list >&2
   fail "listing the fuzz targets"
 }
-targets=$(awk '
+targets=$(awk -v skip="$skip" '
   /^ok[ \t]/ { for (i = 1; i <= n; i++) print $2, names[i]; n = 0; next }
-  /^Fuzz/    { names[++n] = $1 }
+  /^Fuzz/    { if (skip == "" || $1 !~ skip) names[++n] = $1 }
 ' build/fuzz/list)
 [ -n "$targets" ] || fail "no fuzz targets found"
 

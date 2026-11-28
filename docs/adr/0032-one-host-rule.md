@@ -130,6 +130,8 @@ the consent page's Origin check. Each package that owns such a check keeps a sum
 `testdata/hostdecisions.golden`, and the inputs each check passes (a denylist: the inputs it stops),
 `testdata/hostdecisions.allowed`, which is edited by hand, so a widening is a reviewed line. What a
 check passes today but should not is listed with its issue in `testdata/hostdecisions.residuals`.
+Each such package's `FuzzHostDecisions` fuzzes the host beyond the families, on demand (#661,
+`docs/maintainers/host-fuzz.md`).
 `internal/testutil/hostfamilies` lists the packages and their checks. Not covered: the trusted
 proxies and `X-Forwarded-For`, which take IP addresses and prefixes; the class X identifiers no
 column judges, such as an assertion's `aud`; the access gate's email and hosted domains, which compare

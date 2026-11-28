@@ -14,7 +14,7 @@ var anon = []string{
 	"BYWARD_UPSTREAM_URL=http://upstream:9000/mcp",
 }
 
-func loadAnon(t *testing.T, readFile readFileFunc, env ...string) (*Config, error) {
+func loadAnon(t testing.TB, readFile readFileFunc, env ...string) (*Config, error) {
 	t.Helper()
 	c, _, err := Load(nil, append(append([]string{}, anon...), env...), readFile)
 	return c, err

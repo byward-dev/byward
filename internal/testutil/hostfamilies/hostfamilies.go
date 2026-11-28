@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/testutil/golden"
@@ -53,6 +54,10 @@ var columns = map[string][]string{
 type Probe struct {
 	Family, Wrap, Port string
 	Input              string
+	// before and after are what Input holds around its host[:port] (a URL's scheme and path), for
+	// Fuzz to place a fuzzed host the same way; hosted is false for a URL shape, which has none.
+	before, after string
+	hosted        bool
 }
 
 // hostBases are the hosts the families start from. Each family is meant to hold forms a host check
@@ -62,7 +67,7 @@ var hostBases = []struct {
 	hosts  []string
 }{
 	{"name", []string{"mcp.example.com", "MCP.Example.COM", "app.example", "evil.example", "localhost", "LOCALHOST", "byward-metrics.monitoring.svc", "my_mcp", "single"}},
-	{"name edge", []string{"mcp.example.com.", "a..b", ".mcp.example.com", "-a.example", "a-.example", "mcp.10", "app.0x", "app.0XF", "10.0.0.999", "localhost.", "*.example.com", "u@mcp.example.com", "a?b.example", "a b.example", "a%41.example", "S3CRET~tok", "*", ".", "..", ""}},
+	{"name edge", []string{"mcp.example.com.", "app.example.", "xn--bcher-kva.example.", "a..b", ".mcp.example.com", "-a.example", "a-.example", "mcp.10", "app.0x", "app.0XF", "10.0.0.999", "localhost.", "*.example.com", "u@mcp.example.com", "a?b.example", "a b.example", "a%41.example", "S3CRET~tok", "*", ".", "..", ""}},
 	// Near misses of the hosts the columns' lists hold: a subdomain, a suffix without a dot, a prefix.
 	{"near miss", []string{"www.mcp.example.com", "sub.app.example", "evilmcp.example.com", "xapp.example", "mcp.example.com.evil.example", "sub.xn--bcher-kva.example"}},
 	{"idn", []string{"xn--bcher-kva.example", "bücher.example", "ｍｃｐ.example.com", "b%C3%BCcher.example", "faß.example", "faẞ.example"}},
@@ -96,9 +101,25 @@ var ports = []string{
 	":0x50", ":8a", ":８０", ":80:80", ":80:443", ":80]",
 }
 
+// probeSets are the probe lists built so far, by their arguments: Fuzz builds a package's columns
+// for every input, and the lists are the costly part. Each is clipped, so a caller that appends to
+// one gets a copy.
+var probeSets sync.Map
+
+// memo is the probe list for key, built once.
+func memo(key string, build func() []Probe) []Probe {
+	if ps, ok := probeSets.Load(key); ok {
+		return ps.([]Probe)
+	}
+	ps, _ := probeSets.LoadOrStore(key, slices.Clip(build()))
+	return ps.([]Probe)
+}
+
 // HostProbes are every host family, wrapped every way, with every port: the inputs a check that
 // reads a host[:port] or a host header is judged on, in a fixed order, each input once.
-func HostProbes() []Probe {
+func HostProbes() []Probe { return memo("host", hostProbes) }
+
+func hostProbes() []Probe {
 	seen := map[string]bool{}
 	var out []Probe
 	for _, b := range hostBases {
@@ -110,7 +131,7 @@ func HostProbes() []Probe {
 						continue
 					}
 					seen[in] = true
-					out = append(out, Probe{Family: b.family, Wrap: w.name, Port: portName(p), Input: in})
+					out = append(out, Probe{Family: b.family, Wrap: w.name, Port: portName(p), Input: in, hosted: true})
 				}
 			}
 		}
@@ -158,6 +179,10 @@ var urlShapes = []struct{ name, url string }{
 // shape once, with path appended (path "" for an origin), each input once. A URL shape's scheme is
 // its own.
 func URLProbes(path string, schemes ...string) []Probe {
+	return memo(strconv.Quote(path)+" "+strings.Join(schemes, " "), func() []Probe { return urlProbes(path, schemes) })
+}
+
+func urlProbes(path string, schemes []string) []Probe {
 	seen := map[string]bool{}
 	var out []Probe
 	add := func(p Probe) {
@@ -168,7 +193,8 @@ func URLProbes(path string, schemes ...string) []Probe {
 	}
 	for _, scheme := range schemes {
 		for _, p := range HostProbes() {
-			p.Input = scheme + "://" + p.Input + path
+			p.before, p.after = scheme+"://", path
+			p.Input = p.before + p.Input + p.after
 			add(p)
 		}
 	}
@@ -190,6 +216,10 @@ type Column struct {
 	// Denies marks a denylist, whose baseline lists the inputs it stops: a denylist widens by
 	// stopping fewer, so the input it no longer stops is the one that fails.
 	Denies bool
+	// Lists marks a check that passes only spellings of the hosts on a fixed list, so Fuzz fails an
+	// input it passes that the baseline does not list (#661). A check that takes an open set of
+	// hosts, such as a setting's parser, is not one.
+	Lists bool
 }
 
 // Run judges every input of every column, checks the summary against testdata/hostdecisions.golden,

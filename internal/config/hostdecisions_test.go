@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/testutil/hostfamilies"
 )
 
@@ -13,6 +14,15 @@ import (
 // and the inputs a setting takes in testdata/hostdecisions.allowed, so a setting that takes a new
 // form fails by name (#656). The messages are hostrule.golden's.
 func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
+	hostfamilies.Run(t, "internal/config", hostColumns(t))
+}
+
+// FuzzHostDecisions fuzzes the host each of these checks reads, beyond the golden's families (#661):
+// see hostfamilies.Fuzz for what it fails.
+func FuzzHostDecisions(f *testing.F) { hostfamilies.Fuzz(f, hostColumns, host.Split, host.Serialize) }
+
+// hostColumns are the checks the golden test and FuzzHostDecisions judge.
+func hostColumns(t testing.TB) []hostfamilies.Column {
 	// An empty value is never parsed: it is the setting's empty meaning (unset, its default, or off
 	// for internal-listen), which every setting takes, as Load reads it. A URL setting's column
 	// records what its parser takes, the widest it decides: an http public URL or issuer on loopback
@@ -56,7 +66,7 @@ func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
 	}
 	https, both := hostfamilies.URLProbes("/mcp", "https"), hostfamilies.URLProbes("/mcp", "https", "http")
 	hosts := hostfamilies.HostProbes()
-	hostfamilies.Run(t, "internal/config", []hostfamilies.Column{
+	return []hostfamilies.Column{
 		setting("public-url", "", both, func(v Value) error { _, err := parsePublicURL(v); return err }),
 		setting("upstream-url", "", both, func(v Value) error { _, err := parseUpstreamURL(v); return err }),
 		setting("resource-documentation", "", https, single(parseResourceDocumentation)),
@@ -76,7 +86,7 @@ func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
 		noAuth("listen", hosts),
 		noAuth("allowed-hosts", hosts),
 		noAuth("allowed-origins", hostfamilies.URLProbes("", "https", "http")),
-	})
+	}
 }
 
 var (
