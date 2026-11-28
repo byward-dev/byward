@@ -99,15 +99,12 @@ func TestSecretKindNamesOnlyTheKindsItLists(t *testing.T) {
 		"A" + fakeToken("ghp_"), "ghp_\t" + strings.Repeat("Q7", 18), "https://h.example/a:b@c", "https://h.example:8080/pkg@1.0",
 		"Z" + fakeToken("ghp_"), "z" + fakeToken("ghp_"), "9" + fakeToken("ghp_"), "0" + fakeToken("ghp_"), // a word's character before a prefix, at each end of each range
 		"postgres://app:@db.example/app", "a+password=b",
-		"docs at https://docs.example: ask ops@example.com",                              // a space ends a URL's password
-		"docs at https://docs.example see ops:on-call@example.com",                       // and its user name
-		"https://ops@a.example:8443,ops@example.com",                                     // an @ ends a URL's user name
-		`{"level":"info","endpoint":"https://api.example.com","user":"bob@example.com"}`, // a JSON separator ends the user name
-		`{"iss":"https://login.example","email":"a@b.example"}`,
-		`{"u":"https://x.example"}, then bob@x.example`,                                     // a " before a }
-		`{"level":"info","endpoint":"https://api.example.com/v1","user":"bob@example.com"}`, // a path before the @
-		"url=https://api.example.com user=bob@example.com",                                  // a space before the @
-		"smtp://ops:@mail.example,ops@example.com"} {                                        // and its password
+		"docs at https://docs.example: ask ops@example.com",        // a space ends a URL's password
+		"docs at https://docs.example see ops:on-call@example.com", // and its user name
+		"https://ops@a.example:8443,ops@example.com",               // an @ ends a URL's user name
+		`{"u":"https://x.example"}, then bob@x.example`,            // a " before a }
+		"url=https://api.example.com user=bob@example.com",         // a space before the @
+		"smtp://ops:@mail.example,ops@example.com"} {               // and its password
 		if got := secretKind(s); got != "" {
 			t.Errorf("secretKind(%q) = %q, want none", s, got)
 		}
@@ -254,6 +251,46 @@ func TestWhatConfigRefusesAsItShowsAValueIsRedacted(t *testing.T) {
 	for _, v := range []string{"postgres://u:pa, " + "ss@h", "postgres://u:pa,x/y," + "ss@h"} {
 		if ShownListSecretKind(strings.Split(v, ",")) != passwordKind || !LooksSecret(v) {
 			t.Errorf("%q: refused as a list but redacted %v", v, LooksSecret(v))
+		}
+	}
+}
+
+// A JSON document is read by its parts, every key and every string, so a line an upstream logs as
+// JSON keeps an origin and an email it names, and still shows no secret in any part (#657). A line
+// that is not a whole JSON document is read as text, as before.
+func TestShownSecretKindReadsAJSONDocumentByItsParts(t *testing.T) {
+	dsn := "postgres://app:" + "s3cretQ7" + "@db.example/x"
+	for _, tc := range []struct{ name, shown, want string }{
+		{"an origin, then an email", `{"endpoint":"https://api.example.com","user":"bob@example.com"}`, ""},
+		{"an origin with a port, then an email", `{"endpoint":"https://api.example.com:8443","user":"bob@example.com"}`, ""},
+		{"an array of URLs, then an email", `{"urls":["https://a.example:8443","mailto:x"],"to":"bob@example.com"}`, ""},
+		{"an array, then an email", `[{"url":"https://a.example:8443"},"bob@example.com"]`, ""},
+		{"spaces around the document", "  " + `{"endpoint":"https://api.example.com:8443","user":"bob@example.com"}` + " ", ""},
+		{"numbers, booleans and null", `{"port":8443,"tls":true,"proxy":null}`, ""},
+		{"a DSN as a value", `{"level":"info","msg":"connect","dsn":"` + dsn + `"}`, passwordKind},
+		{"a DSN in an error string", `{"err":"dial ` + dsn + `: refused"}`, passwordKind},
+		{"a DSN nested in an array", `{"nested":{"a":["` + dsn + `"]}}`, passwordKind},
+		{"a DSN written with \\u escapes", `{"dsn":"postgres://app:s3cretQ7\u0040db.example/x"}`, passwordKind},
+		{"a DSN as a key", `{"` + dsn + `":1}`, passwordKind},
+		{"a token in an array", `["ok","` + fakeToken("ghp_") + `"]`, "a GitHub token"},
+		{"a JSON document inside a string", `{"body":"{\"dsn\":\"` + dsn + `\"}"}`, passwordKind},
+		{"a password key in a value", `{"conn":"host=db password=Q7Q7Q7"}`, passwordKind},
+		{"a JSON document inside a string, its @ escaped", `{"body":"{\"dsn\":\"postgres://app:s3cretQ7\\u0040db.example/x\"}"}`, passwordKind}, // read by its parts too, not as text
+		{"a JSON document inside a string, an origin then an email", `{"body":"{\"endpoint\":\"https://api.example.com\",\"user\":\"bob@example.com\"}"}`, ""},
+		{"a password split across two strings of an array", `["postgres://app:Hun","ter2Q7@db.example/x"]`, passwordKind}, // as main finds it
+		{"a password split across two values of an object", `{"a":"postgres://app:Hun","b":"ter2Q7@db.example/x"}`, passwordKind},
+		{"a port, then an email, in two strings", `["https://api.example.com:8443","bob@example.com"]`, ""}, // a port is no password
+		{"two kinds, named by the first key", `{"a":"` + fakeToken("ghp_") + `","z":"` + dsn + `"}`, "a GitHub token"},
+		{"text before the JSON", `time=1 {"endpoint":"https://api.example.com:8443","user":"bob@x.example"}`, passwordKind},
+		{"a line cut short", `{"endpoint":"https://api.example.com:8443","user":"bob@x.example"`, passwordKind},
+		{"a DSN as plain text", "connect " + dsn + " failed", passwordKind},
+		{"a \" in a URL's user name, as main reads it", `postgres://us"er:` + "s3cretPW" + `@h/x`, passwordKind},
+	} {
+		if got := ShownSecretKind(tc.shown); got != tc.want {
+			t.Errorf("%s: ShownSecretKind(%q) = %q, want %q", tc.name, tc.shown, got, tc.want)
+		}
+		if got := LooksSecret(tc.shown); got != (tc.want != "") {
+			t.Errorf("%s: LooksSecret(%q) = %v, want %v", tc.name, tc.shown, got, tc.want != "")
 		}
 	}
 }

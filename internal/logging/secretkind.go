@@ -1,7 +1,9 @@
 package logging
 
 import (
+	"encoding/json"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -51,12 +53,8 @@ var tokenPatterns = func() []struct {
 
 // urlPassword is a URL with a password in its user part, such as postgres://user:pass@host/db. An
 // empty password (user:@host) is none. A comma is a user part's character (RFC 3986's sub-delims);
-// a list's entries never hold one, and are each read on their own (ShownListSecretKind). A " is
-// none (RFC 3986 §3.2.1: userinfo is unreserved, pct-encoded, sub-delims and ":"), so the user name
-// stops at one, and a JSON log line naming an origin and, later, an email is no URL with a password
-// ({"url":"https://api.example","user":"bob@example.com"}); the password is still read past a ", so
-// one a reader would mistake for a quote is still found (#657).
-var urlPassword = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^/@\s"]*:[^/@\s]+@`)
+// a list's entries never hold one, and are each read on their own (ShownListSecretKind).
+var urlPassword = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*:[^/@\s]+@`)
 
 // keyValuePassword is a password given by its key, as connection strings do: Server=db;Password=x,
 // libpq's host=db password=x, or a URL query's ?password=x. A " counts as a start too, as a value
@@ -103,7 +101,14 @@ var percentEscape = regexp.MustCompile(`%[0-9A-Fa-f]{2}`)
 // that part, user name or password, where a space would end it; each reading is checked as it is
 // and with each percent-escape undone, an escaped space or control character to the reading's own
 // character, as a Go escape is.
+//
+// A JSON document, an object or array and nothing else, is read by its parts instead (jsonKind): a
+// log line an upstream writes as JSON names an origin and, later, an email, which read as one text
+// look like a URL with a password.
 func ShownSecretKind(shown string) string {
+	if kind, ok := jsonKind(shown); ok {
+		return kind
+	}
 	for _, escape := range []string{" ", "\x00"} {
 		read := goEscape.ReplaceAllString(shown, escape)
 		decoded := percentEscape.ReplaceAllStringFunc(read, func(e string) string {
@@ -158,4 +163,46 @@ func ShownListSecretKind(entries []string) string {
 		return passwordKind
 	}
 	return ""
+}
+
+// jsonKind reads shown, when it is a JSON document (an object or an array, nothing before or after
+// it but white space), by its parts: every key and every string, in order, as a list's entries are
+// read (ShownListSecretKind), so a string that is itself a JSON document is read by its parts too,
+// and a password split across two strings is found as one a comma split. Numbers, booleans and null
+// hold no secret. JSON's own escapes (\" and \uXXXX) are undone by decoding. ok is false for
+// anything else, a line with text before its JSON or one cut short included, which is read as text,
+// as before: that reading can only find more (#657).
+func jsonKind(shown string) (kind string, ok bool) {
+	doc := strings.TrimSpace(shown)
+	if doc == "" || doc[0] != '{' && doc[0] != '[' || !json.Valid([]byte(doc)) {
+		return "", false
+	}
+	var v any
+	if json.Unmarshal([]byte(doc), &v) != nil {
+		return "", false
+	}
+	return ShownListSecretKind(jsonStrings(v, nil)), true
+}
+
+// jsonStrings appends the keys and strings of a decoded JSON value to parts, in order: an object's
+// keys sorted, each followed by its value, so the kind named is always the same one.
+func jsonStrings(v any, parts []string) []string {
+	switch v := v.(type) {
+	case string:
+		parts = append(parts, v)
+	case []any:
+		for _, e := range v {
+			parts = jsonStrings(e, parts)
+		}
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			parts = jsonStrings(v[k], append(parts, k))
+		}
+	}
+	return parts
 }
