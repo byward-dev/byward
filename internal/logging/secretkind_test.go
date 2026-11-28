@@ -289,7 +289,8 @@ func TestShownSecretKindReadsAJSONDocumentByItsParts(t *testing.T) {
 		{"a token in an array", `["ok","` + fakeToken("ghp_") + `"]`, "a GitHub token"},
 		{"a JSON document inside a string", `{"body":"{\"dsn\":\"` + dsn + `\"}"}`, passwordKind},
 		{"a password key in a value", `{"conn":"host=db password=Q7Q7Q7"}`, passwordKind},
-		{"a JSON document inside a string, its @ escaped", `{"body":"{\"dsn\":\"postgres://app:s3cretQ7\\u0040db.example/x\"}"}`, passwordKind}, // read by its parts too, not as text
+		{"a JSON document inside a string, its @ escaped", `{"body":"{\"dsn\":\"postgres://app:s3cretQ7\\u0040db.example/x\"}"}`, passwordKind},                     // read by its parts too, not as text
+		{"a JSON document inside a string after a space, an origin then an email", `{"body":" {\"origin\":\"https://a.example\",\"user\":\"ann@b.example\"}"}`, ""}, // a nested document is known trimmed
 		{"a JSON document inside a string, an origin then an email", `{"body":"{\"endpoint\":\"https://api.example.com\",\"user\":\"bob@example.com\"}"}`, ""},
 		{"a password split across two strings of an array", `["postgres://app:Hun","ter2Q7@db.example/x"]`, passwordKind}, // as main finds it
 		{"a password split across two values of an object", `{"a":"postgres://app:Hun","b":"ter2Q7@db.example/x"}`, passwordKind},
