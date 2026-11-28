@@ -301,6 +301,20 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					}
 				})
 			}
+			// Once discovery is cached, AuthCodeURL makes no call that the ending could fail: the
+			// sign-in goes on to the IdP as on a live request, with nothing logged as a failure.
+			t.Run("/authorize prompt=none, a cached discovery", func(t *testing.T) {
+				e := newEnv(t, withRemember(t, nil))
+				h := e.remember(t, nil) // its own sign-in discovers
+				lm, am := e.marks()
+				r := httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+authorizeQuery(silent(nil)).Encode(), nil)
+				r.AddCookie(h)
+				w := e.serveIn(endedCtx(end), r)
+				e.pinned(t, w, lm, am, brokerCell{status: http.StatusSeeOther})
+				if loc := w.Header().Get("Location"); !strings.Contains(loc, "/oauth2/v2.0/authorize") {
+					t.Errorf("redirected to %q; want the IdP's sign-in", loc)
+				}
+			})
 			// A refresh the IdP fails for real (not Unavailable), on an ended request: its ERROR and
 			// token_rejected stay; the answer follows the ending (requestEnded's rule, #700).
 			for name, refreshErr := range map[string]error{
