@@ -209,8 +209,9 @@ request": one relayed to an HTTP upstream, one sent to a stdio upstream process,
 still reading, one waiting for the `server/discover` probe that tells a stdio upstream's protocol era, or one waiting
 for its On-Behalf-Of token. Nothing is sent, since the client is gone. The same status reaches `byward_http_request_duration_seconds`
 (class `4xx`) and the server span, so a client that gave up is not counted as an upstream failure. Such a request still
-waiting when the proxy shuts down is answered 503 `the proxy is shutting down`, and its connection is closed
-(`Connection: close` over HTTP/1.1, GOAWAY over HTTP/2), so the client can retry. In neither case, nor during a stream
+waiting when the proxy shuts down is answered 503 `the proxy is shutting down`. That includes one whose client is still
+uploading its body: the shutdown ends the body's read at once, so the client does not wait out the shutdown grace. Its
+connection is then closed (`Connection: close` over HTTP/1.1, GOAWAY over HTTP/2), so the client can retry. In neither case, nor during a stream
 that ends either way, is a failure logged: not the relay's `upstream error`, nor the stdio upstream's `relaying to the
 upstream process failed`, `cannot start the upstream process` or `initialize failed: no MCP session`.
 

@@ -79,10 +79,14 @@ func (e *env) endedAnswer(t *testing.T, end lifecycle.Ended, w *httptest.Respons
 func (e *env) marks() (int, int) { return len(e.logs.String()), len(e.audit.String()) }
 
 // cutIn serves r, its body a lifecycle.CutBody, until the broker has read the body's first byte,
-// then ends the request as end does and fails the rest of the read, as the server's connection
-// does. It returns what the broker answered.
+// then ends the request as end does. A client that went away takes its connection, which fails the
+// rest of the read; a shutdown is served through a real server instead (shutDownIn). It returns
+// what the broker answered.
 func (e *env) cutIn(t *testing.T, end lifecycle.Ended, r *http.Request, body *lifecycle.CutBody) *httptest.ResponseRecorder {
 	t.Helper()
+	if end.Ending == lifecycle.Shutdown {
+		return e.shutDownIn(t, r, body)
+	}
 	ctx, stop := end.Start(context.Background())
 	defer stop() // ends the request on a failure path too, so its serve goroutine returns
 	got := make(chan *httptest.ResponseRecorder, 1)
@@ -102,6 +106,58 @@ func (e *env) cutIn(t *testing.T, end lifecycle.Ended, r *http.Request, body *li
 		t.Fatal("the broker never answered")
 		return nil
 	}
+}
+
+// shutDownIn sends r, its body a lifecycle.CutBody, to the broker through a real server wrapped as
+// the proxy wraps its own (shutdown.CutsBodyReads), until the broker has read the body's first
+// byte, then shuts the server's requests down. The client goes on holding its body: the server's
+// read deadline ends the broker's read (#697). It returns what the client got.
+func (e *env) shutDownIn(t *testing.T, r *http.Request, body *lifecycle.CutBody) *httptest.ResponseRecorder {
+	t.Helper()
+	srv, shutDown := lifecycle.NewShutdownServer(t, e.srv.Config.Handler)
+	srv.StartTLS()
+	defer srv.Close() // waits for the broker's handler, so after the body has stopped
+	defer body.Stop()
+	req, err := http.NewRequest(r.Method, srv.URL+r.URL.RequestURI(), body) //nolint:gosec // G704: the test's own server
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header, req.Host = r.Header.Clone(), r.Host
+	req.Header.Set("Expect", "100-continue") // the body's first byte is sent once the broker reads it
+	client := srv.Client()
+	client.Transport.(*http.Transport).ExpectContinueTimeout = time.Minute
+	type answer struct {
+		res *http.Response
+		err error
+	}
+	got := make(chan answer, 1)
+	go func() { res, err := client.Do(req); got <- answer{res, err} }() //nolint:gosec // G704: the test's own server
+	select {
+	case <-body.Started():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the broker never read the request body")
+	}
+	shutDown()
+	var a answer
+	select {
+	case a = <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the broker never answered")
+	}
+	if a.err != nil {
+		t.Fatalf("no answer: %v", a.err)
+	}
+	defer func() { _ = a.res.Body.Close() }()
+	w := httptest.NewRecorder()
+	for k, v := range a.res.Header {
+		w.Header()[k] = v
+	}
+	if a.res.Close { // the client reads Connection: close into Close
+		w.Header().Set("Connection", "close")
+	}
+	w.WriteHeader(a.res.StatusCode)
+	_, _ = io.Copy(w, a.res.Body)
+	return w
 }
 
 // endedCtx is a request context that ended as e does.
@@ -128,7 +184,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 		noOutbound  = "nothing goes outbound before the broker reads a body or looks a client up"
 		noPreBound  = "the broker sets no bound on its work before a body read or lookup"
 		storeCalls  = "a request that ended with its body read runs to completion; its store calls under the ended context are #693, which memstore cannot show (a callback's calls after its spent login are detached, so only its spendLogin is)"
-		readBound   = "the server's ReadTimeout bounds a stalled body, not the broker"
+		readBound   = "the server's ReadTimeout bounds a stalled body, not the broker; a shutdown ends it (shutdown.CutsBodyReads)"
 		inFlightOut = "nothing goes outbound while the broker reads a body"
 	)
 	at := func(e lifecycle.Ending, s lifecycle.State) lifecycle.Cell { return lifecycle.Cell{Ending: e, State: s} }

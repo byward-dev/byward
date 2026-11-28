@@ -185,6 +185,7 @@ type brokenWriter struct {
 	body    bytes.Buffer
 	broken  string // "", "write" or "flush": what fails
 	started bool   // WriteHeader was called
+	expire  func() // fails the request body's read, as a passed read deadline does; nil: nothing to fail
 }
 
 var errBrokenPipe = errors.New("broken pipe")
@@ -212,6 +213,18 @@ func (w *brokenWriter) FlushError() error {
 	defer w.mu.Unlock()
 	if w.broken == "flush" {
 		return errBrokenPipe
+	}
+	return nil
+}
+
+// SetReadDeadline is what shutdown.CutsBodyReads calls at a shutdown. A deadline already past fails
+// the body's read, as the server's connection does (server's TestAShutdownEndsAStalledRequestBodyWith503).
+func (w *brokenWriter) SetReadDeadline(d time.Time) error {
+	w.mu.Lock()
+	expire := w.expire
+	w.mu.Unlock()
+	if expire != nil && !d.IsZero() && !d.After(time.Now()) {
+		expire()
 	}
 	return nil
 }

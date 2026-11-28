@@ -33,7 +33,7 @@ type Servers struct {
 func hardened(addr string, h http.Handler, log *slog.Logger) *http.Server {
 	return &http.Server{
 		Addr:              addr,
-		Handler:           h,
+		Handler:           shutdown.CutsBodyReads(h), // a shutdown ends a stalled body read too (#697)
 		ReadHeaderTimeout: ReadHeaderTimeout,
 		ReadTimeout:       ReadTimeout,
 		IdleTimeout:       IdleTimeout,

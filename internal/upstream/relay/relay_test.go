@@ -27,10 +27,10 @@ import (
 
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
-	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/fakeenvproxy"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 	"github.com/byward-dev/byward/internal/testutil/rerun"
 	"golang.org/x/net/http/httpproxy"
 )
@@ -1071,10 +1071,7 @@ func TestARequestWaitingForTheUpstreamWhenTheProxyShutsDownIsAnswered503AndLogsN
 	u, proxy := relayTarget(addr, nil)
 	var logs bytes.Buffer
 	log := logging.New(&logs, "text")
-	srv := httptest.NewUnstartedServer(logging.Middleware(log, New(log, u, withProxy(proxy))))
-	base, shutDown := shutdown.WithCancel(t.Context())
-	defer shutDown()
-	srv.Config.BaseContext = func(net.Listener) context.Context { return base }
+	srv, shutDown := lifecycle.NewShutdownServer(t, logging.Middleware(log, New(log, u, withProxy(proxy))))
 	srv.Start()
 	t.Cleanup(srv.Close)
 	type answer struct {
