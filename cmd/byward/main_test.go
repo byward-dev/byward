@@ -80,6 +80,13 @@ func oidcAuthEnv(t *testing.T) []string {
 	return append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+secret)
 }
 
+// keycloakOperatorEnv is an operator command's env (operatorEnv) for a keycloak IdP that admits a user
+// with no group, with the Entra client secret as the oidc one, and extra after.
+func keycloakOperatorEnv(env []string, extra ...string) []string {
+	return append(append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(env, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
+		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true"), extra...)
+}
+
 // stdioAuthEnv is authEnv for a stdio upstream, which refuses the identity assertion's keys directory.
 func stdioAuthEnv(t *testing.T) []string {
 	t.Helper()
@@ -774,9 +781,7 @@ func TestRevokeUserNamesACredentialShapedKeyOnlyByItsLength(t *testing.T) {
 	} {
 		t.Run(tc.claim+"/"+tc.key, func(t *testing.T) {
 			env, _, _ := operatorEnv(t, proxysStore)
-			env = append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(env, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
-				"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward",
-				"BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_OIDC_SUBJECT_CLAIM="+tc.claim)
+			env = keycloakOperatorEnv(env, "BYWARD_OIDC_SUBJECT_CLAIM="+tc.claim)
 			code, stdout, stderr := runWith([]string{"revoke-user", tc.key}, env...)
 			want := "revoked user " + tc.key + " in BYWARD_STORE_DIR" + revoked
 			if tc.hidden != "" {

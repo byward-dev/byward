@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -514,8 +515,7 @@ func TestOperatorCommandsShowNoArgumentTheyAreGiven(t *testing.T) {
 	coveredElsewhere := map[string]string{"init": "TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints"}
 	processStderr := redirectStderr(t)
 	entraEnv, _, _ := operatorEnv(t, noStore)
-	oidcEnv := append(without(entraEnv, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(entraEnv, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
-		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
+	oidcEnv := keycloakOperatorEnv(entraEnv)
 	refused := func(v string) string {
 		// The length is counted here, not by logging.NotShown, so a NotShown that showed part of v fails.
 		return fmt.Sprintf("byward: revoke-user (%d characters, not shown): %s\n", utf8.RuneCountInString(v), server.ErrNotAUserKey)
@@ -579,7 +579,7 @@ func TestOperatorCommandsShowNoArgumentTheyAreGiven(t *testing.T) {
 			cell{"revoke-user, entra", refused(v), []string{"revoke-user", v}, entraEnv},
 			cell{"revoke-user, oidc", oidcWant, []string{"revoke-user", v}, oidcEnv}))
 	}
-	for _, name := range withoutCell(commandNames(commands), func(n string) bool { return placed[n] || coveredElsewhere[n] != "" }) {
+	for _, name := range withoutCell(slices.Collect(maps.Keys(commands)), func(n string) bool { return placed[n] || coveredElsewhere[n] != "" }) {
 		t.Errorf("operator command %q has no cell here: add one, or name the test that covers it", name)
 	}
 }
@@ -599,15 +599,7 @@ func withoutCell(names []string, hasCell func(string) bool) []string {
 	return out
 }
 
-// commandNames are the names in cmds; flagNames those of fs's flags.
-func commandNames(cmds map[string]command) []string {
-	names := make([]string, 0, len(cmds))
-	for n := range cmds {
-		names = append(names, n)
-	}
-	return names
-}
-
+// flagNames are the names of fs's flags.
 func flagNames(fs *flag.FlagSet) []string {
 	var names []string
 	fs.VisitAll(func(f *flag.Flag) { names = append(names, f.Name) })

@@ -197,10 +197,21 @@ func LooksSecret(s string) bool {
 }
 
 // catalogueRefuses reports whether config would refuse s in a setting that is not secret, however
-// that setting shows it: as given, quoted when it is not printable (AsGiven), or as a list's
-// entries, where a password a comma split is found (ShownListSecretKind).
+// that setting shows it: as given or quoted when it is not printable (AsGiven), each whole and as a
+// list's entries, where a password a comma split is found (ShownListSecretKind). A reading equal to
+// one already read is skipped, as most are: logs read every string attribute this way, a request's
+// path among them.
 func catalogueRefuses(s string) bool {
-	return ShownSecretKind(s) != "" || ShownSecretKind(AsGiven(s)) != "" || ShownListSecretKind(strings.Split(s, ",")) != ""
+	readings := []string{s}
+	if quoted := AsGiven(s); quoted != s {
+		readings = append(readings, quoted)
+	}
+	for _, r := range readings {
+		if ShownSecretKind(r) != "" || strings.Contains(r, ",") && ShownListSecretKind(strings.Split(r, ",")) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // HoldsJWT reports whether s holds a compact JWS or JWE: a segment starting eyJ at the start of a

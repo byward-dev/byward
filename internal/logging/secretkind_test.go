@@ -248,8 +248,8 @@ func TestWhatConfigRefusesAsItShowsAValueIsRedacted(t *testing.T) {
 			t.Errorf("%q: refused as shown (%q) but redacted %v", v, ShownSecretKind(AsGiven(v)), LooksSecret(v))
 		}
 	}
-	for _, v := range []string{"postgres://u:pa, " + "ss@h", "postgres://u:pa,x/y," + "ss@h"} {
-		if ShownListSecretKind(strings.Split(v, ",")) != passwordKind || !LooksSecret(v) {
+	for _, v := range []string{"postgres://u:pa, " + "ss@h", "postgres://u:pa,x/y," + "ss@h", "postgres://u\n:Q7Q7Q7," + "q x@h"} { // the last only as quoted
+		if ShownListSecretKind(strings.Split(AsGiven(v), ",")) != passwordKind || !LooksSecret(v) { // a list as config shows it
 			t.Errorf("%q: refused as a list but redacted %v", v, LooksSecret(v))
 		}
 	}
@@ -267,6 +267,7 @@ func TestShownSecretKindReadsAJSONDocumentByItsParts(t *testing.T) {
 		{"an array, then an email", `[{"url":"https://a.example:8443"},"bob@example.com"]`, ""},
 		{"spaces around the document", "  " + `{"endpoint":"https://api.example.com:8443","user":"bob@example.com"}` + " ", ""},
 		{"numbers, booleans and null", `{"port":8443,"tls":true,"proxy":null}`, ""},
+		{"a number too large for a float, then an origin and an email", `{"n":1e999,"endpoint":"https://api.example.com","user":"bob@example.com"}`, ""}, // still read by its parts
 		{"a DSN as a value", `{"level":"info","msg":"connect","dsn":"` + dsn + `"}`, passwordKind},
 		{"a DSN in an error string", `{"err":"dial ` + dsn + `: refused"}`, passwordKind},
 		{"a DSN nested in an array", `{"nested":{"a":["` + dsn + `"]}}`, passwordKind},
@@ -279,7 +280,11 @@ func TestShownSecretKindReadsAJSONDocumentByItsParts(t *testing.T) {
 		{"a JSON document inside a string, an origin then an email", `{"body":"{\"endpoint\":\"https://api.example.com\",\"user\":\"bob@example.com\"}"}`, ""},
 		{"a password split across two strings of an array", `["postgres://app:Hun","ter2Q7@db.example/x"]`, passwordKind}, // as main finds it
 		{"a password split across two values of an object", `{"a":"postgres://app:Hun","b":"ter2Q7@db.example/x"}`, passwordKind},
-		{"a port, then an email, in two strings", `["https://api.example.com:8443","bob@example.com"]`, ""}, // a port is no password
+		{"a port, then an email, in two strings", `["https://api.example.com:8443","bob@example.com"]`, ""},                             // a port is no password
+		{"a password split across two values, keys out of order", `{"b":"postgres://app:Hun","a":"ter2Q7@db.example/x"}`, passwordKind}, // read in the document's order
+		{"a token under a key given twice", `{"a":"` + fakeToken("ghp_") + `","a":"x"}`, "a GitHub token"},                              // every value of a duplicate key
+		{"a token in a nested document with a key given twice", `{"a":"{\"k\":\"` + fakeToken("ghp_") + `\"\u002c\"k\":1}"}`, "a GitHub token"},
+		{"a password key after a control character in a string", `{"m":"host=db\u000b` + `password=Q7Q7Q7"}`, passwordKind}, // each string read as config shows it (AsGiven)
 		{"two kinds, named by the first key", `{"a":"` + fakeToken("ghp_") + `","z":"` + dsn + `"}`, "a GitHub token"},
 		{"text before the JSON", `time=1 {"endpoint":"https://api.example.com:8443","user":"bob@x.example"}`, passwordKind},
 		{"a line cut short", `{"endpoint":"https://api.example.com:8443","user":"bob@x.example"`, passwordKind},

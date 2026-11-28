@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"slices"
@@ -37,12 +38,17 @@ func walkSurfaces(t *testing.T) []walkSurface {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entra := leakContexts(t, program)["entra"]
+	contexts := leakContexts(t, program)
+	entra := contexts["entra"]
 	proxy := func(args []string, setting string) func(string) (int, string) {
 		return func(v string) (int, string) {
 			code, stdout, stderr := runDone(args, append(withFormat(slices.Clone(entra), "json"), setting+"="+v)...)
 			return code, stdout + stderr
 		}
+	}
+	// printConfig is --print-config with v in setting, after prefix.
+	printConfig := func(setting, prefix string) func(string) (int, string) {
+		return func(v string) (int, string) { return proxy([]string{"--print-config"}, setting)(prefix + v) }
 	}
 	cli := func(args func(v string) []string, env ...string) func(string) (int, string) {
 		return func(v string) (int, string) {
@@ -69,31 +75,24 @@ func walkSurfaces(t *testing.T) []walkSurface {
 	// revoke-user under an oidc IdP keyed on sub, with a store, takes any printable key, so each kind
 	// reaches the line that names a revoked key (LooksSecret); Entra would refuse every kind first.
 	revokeEnv, _, _ := operatorEnv(t, proxysStore)
-	revokeEnv = append(without(revokeEnv, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(revokeEnv, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
-		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
-	stdio := without(leakContexts(t, program)["stdio"], "BYWARD_UPSTREAM_COMMAND") // the program comes after --
+	revokeEnv = keycloakOperatorEnv(revokeEnv)
+	stdio := without(contexts["stdio"], "BYWARD_UPSTREAM_COMMAND") // the program comes after --
 	return []walkSurface{
 		{"startup log, a free-text setting", "", "", proxy(nil, "BYWARD_OPERATOR_NAME")},
 		{"--print-config, a free-text setting", "", "", proxy([]string{"--print-config"}, "BYWARD_OPERATOR_NAME")},
-		{"--print-config, a URL setting's path", "", "", func(v string) (int, string) {
-			return proxy([]string{"--print-config"}, "BYWARD_RESOURCE_DOCUMENTATION")("https://docs.example/" + v)
-		}},
-		{"--print-config, a list setting's entry", "", "", func(v string) (int, string) {
-			return proxy([]string{"--print-config"}, "BYWARD_ALLOWED_HOSTS")("a.example," + v)
-		}},
-		{"--print-config, a URL list setting's entry", "", "", func(v string) (int, string) {
-			return proxy([]string{"--print-config"}, "BYWARD_CLIENT_DENYLIST")("https://a.example/" + v)
-		}},
-		{"--print-config, a path setting", "", "", func(v string) (int, string) {
-			return proxy([]string{"--print-config"}, "BYWARD_STORE_COUNTER_FILE")("/tmp/" + v)
-		}},
+		{"--print-config, a URL setting's path", "", "", printConfig("BYWARD_RESOURCE_DOCUMENTATION", "https://docs.example/")},
+		{"--print-config, a list setting's entry", "", "", printConfig("BYWARD_ALLOWED_HOSTS", "a.example,")},
+		{"--print-config, a URL list setting's entry", "", "", printConfig("BYWARD_CLIENT_DENYLIST", "https://a.example/")},
+		{"--print-config, a path setting", "", "", printConfig("BYWARD_STORE_COUNTER_FILE", "/tmp/")},
 		{"--print-config, the stdio upstream's program", "", "", func(v string) (int, string) {
 			code, stdout, stderr := runDone([]string{"--print-config", "--", v, "arg"}, withFormat(slices.Clone(stdio), "json")...)
 			return code, stdout + stderr
 		}},
 		{"check --offline, a free-text setting", "check", "", proxy([]string{"check", "--offline"}, "BYWARD_OPERATOR_NAME")},
 		{"doctor, a free-text setting", "doctor", "", proxy([]string{"doctor"}, "BYWARD_OPERATOR_NAME")},
-		{"init entra --tenant", "init", "tenant", cli(func(v string) []string { return []string{"init", "entra", "--tenant", v} })},
+		{"init entra --tenant", "init", "tenant", cli(func(v string) []string {
+			return []string{"init", "entra", "--public-url", "https://m.example/mcp", "--tenant", v}
+		})},
 		{"init entra --public-url, in its path", "init", "public-url", cli(func(v string) []string {
 			return []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/" + v}
 		})},
@@ -120,7 +119,7 @@ var walkNoValue = map[string]string{
 // the rule the operator-command and init tests keep too).
 func walkGaps(surfaces []walkSurface, cmds map[string]command, noValue map[string]string, initFlags *flag.FlagSet) []string {
 	var gaps []string
-	for _, name := range withoutCell(commandNames(cmds), func(n string) bool {
+	for _, name := range withoutCell(slices.Collect(maps.Keys(cmds)), func(n string) bool {
 		return noValue[n] != "" || slices.ContainsFunc(surfaces, func(s walkSurface) bool { return s.command == n })
 	}) {
 		gaps = append(gaps, "command "+name)

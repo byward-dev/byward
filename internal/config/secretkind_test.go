@@ -168,28 +168,29 @@ func TestEverySettingThatIsNotSecretRefusesASecretItWouldShow(t *testing.T) {
 // A realistic value of each setting that holds free text, a name or a host still loads: the kinds
 // are narrow enough not to refuse what an operator means.
 func TestARealisticValueOfAFreeTextSettingIsNoSecret(t *testing.T) {
-	for name, value := range map[string]string{
-		"upstream-credential-header": "X-Api-Key",
-		"upstream-strip-headers":     "X-Debug-Token, X-Atlassian-Base-Url",
-		"allowed-hosts":              "mcp.example.com, 127.0.0.1:8080",
-		"scope":                      "mcp",
-		"resource-name":              "Acme MCP (password reset tools)",
-		"operator-name":              "Acme Corp. IT, xoxb-style bots welcome",
-		"scope-description":          "Read dashboards; no passwords are stored",
-		"oidc-client-id":             "byward-proxy",
-		"oidc-client-key-id":         "ghp-key-2026",
-		"oidc-scopes":                "groups, roles",
-		"oidc-subject-claim":         "sub",
-		"oidc-roles-claim":           "https://example.com/roles",
-		"oidc-groups-claim":          "groups",
-		"oidc-name":                  "Acme SSO",
-		"assertion-header":           "X-Byward-Identity",
-		"obo-header":                 "X-Byward-Downstream-Token",
-		"client-denylist":            "bad.example, https://bad.example/client.json",
-		"cimd-trusted-hosts":         "app.example",
-		"cimd-allowed-hosts":         "app.example",
+	for _, tc := range []struct{ name, value string }{
+		{"upstream-credential-header", "X-Api-Key"},
+		{"upstream-strip-headers", "X-Debug-Token, X-Atlassian-Base-Url"},
+		{"allowed-hosts", "mcp.example.com, 127.0.0.1:8080"},
+		{"scope", "mcp"},
+		{"resource-name", "Acme MCP (password reset tools)"},
+		{"operator-name", "Acme Corp. IT, xoxb-style bots welcome"},
+		{"scope-description", "Read dashboards; no passwords are stored"},
+		{"oidc-client-id", "byward-proxy"},
+		{"oidc-client-key-id", "ghp-key-2026"},
+		{"oidc-scopes", "groups, roles"},
+		{"oidc-subject-claim", "sub"},
+		{"oidc-roles-claim", "https://example.com/roles"},
+		{"oidc-groups-claim", "groups"},
+		{"oidc-name", "Acme SSO"},
+		{"assertion-header", "X-Byward-Identity"},
+		{"obo-header", "X-Byward-Downstream-Token"},
+		{"client-denylist", "bad.example, https://bad.example/client.json"},
+		{"cimd-trusted-hosts", "app.example"},
+		{"cimd-allowed-hosts", "app.example"},
+		{"operator-name", `{"endpoint":"https://api.example.com","user":"bob@example.com"}`}, // a JSON line naming an origin, then an email (#657)
 	} {
-		s := lookup(name)
+		s, value := lookup(tc.name), tc.value
 		c := readContextOf(s)
 		if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); err != nil {
 			t.Errorf("%s=%q: %v, want it to load", s.Env(), value, err)
@@ -425,14 +426,13 @@ func TestCheckShownRefusesAShownSecretAsLoadDoes(t *testing.T) {
 	}
 }
 
-// A JSON line naming an origin and, later, an email holds no URL with a password: it loads in a
-// setting that is not secret, as logs keep it (#657).
-func TestAJSONLineNamingAnOriginAndAnEmailLoads(t *testing.T) {
+// A JSON document is read by its parts as config shows each (logging.AsGiven): a password key after
+// a control character in a string is refused, as it is outside JSON (#657).
+func TestAJSONStringIsReadAsItIsShown(t *testing.T) {
 	s := lookup("operator-name")
 	c := readContextOf(s)
-	for _, value := range []string{`{"endpoint":"https://api.example.com","user":"bob@example.com"}`} {
-		if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); err != nil {
-			t.Errorf("%s=%q: %v, want it to load", s.Env(), value, err)
-		}
+	value := `{"m":"host=db\u000b` + `password=Q7Q7Q7"}`
+	if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); !isConfigError(err) || err.Error() != kindRefusal(s.Env(), value, "a connection string with a password") {
+		t.Errorf("%s=%q: %v, want it refused as a connection string with a password", s.Env(), value, err)
 	}
 }
