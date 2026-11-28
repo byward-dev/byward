@@ -37,22 +37,6 @@ func browserIPv4(h string) string {
 	return reason
 }
 
-// nameCharReason says why name, a host, is refused for a character no host name holds (ADR-0032 §3:
-// only ASCII letters, digits, "-", "." and "_"; an internationalized name in its xn-- form), completing
-// "its host …"; "" when it holds none, or is an IP address (host.BadNameChar), whose ":" is an IPv6
-// address's, not a name's. It names the character's place, or says the name is not ASCII; never the character
-// or the host, which a secret may be.
-func nameCharReason(name string) string {
-	place := host.BadNameChar(name)
-	switch {
-	case place == 0:
-		return ""
-	case notASCII(name): // a name that is not ASCII is told its xn-- form, wherever its first bad character is
-		return reasonNotASCII
-	}
-	return fmt.Sprintf("has a character no host name holds at position %d; a host name has only letters, digits, - . and _", place)
-}
-
 // browserOrigin is u's origin as browsers serialize it (RFC 6454 §6.2): host.Origin, the form the
 // Origin check compares.
 func browserOrigin(u *url.URL) string { return host.Origin(u.Scheme, u.Host) }

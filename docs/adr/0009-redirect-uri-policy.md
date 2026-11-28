@@ -1,6 +1,6 @@
 # ADR-0009: Redirect URI policy — exact HTTPS, any-port loopback, re-checked at /token
 
-- Status: Accepted; amended by ADR-0010, and 2026-11-06 (DCR), 2026-11-17 (diagnostics)
+- Status: Accepted; amended by ADR-0010, and 2026-11-06 (DCR), 2026-11-17 (diagnostics), 2026-11-28 (host rule, #707)
 - Date: 2026-11-05
 - Issue: #9 (F8)
 
@@ -94,3 +94,34 @@ compatibility run shows what Cursor actually sends.
   and cannot sign in.
 - **No change to rule 3:** `docs/how-to/dcr.md` documents Cursor 3.x instead. The first 3.x
   release that works is not known.
+
+## Amendment 2026-11-28 (host rule, #707)
+
+A redirect URI's host and port follow the URL settings' host rule (ADR-0032 §3), as
+`BYWARD_UPSTREAM_URL` takes it: `host.URLReason` whole, then the host name's characters.
+- **The host** holds only ASCII letters, digits, `-`, `.` and `_`. An internationalized name is
+  written in its `xn--` form, and an IPv6 address has no zone.
+- **The port**, if any, is a number from 1 to 65535, with no sign and no leading zero. This holds
+  for a loopback redirect too: rule 2's "any port" means any TCP port. A ":" with no port after it
+  is refused, as it is in every URL setting.
+- **The whole URI** holds no white space, control character or invisible formatting character,
+  in its path as in its host.
+- **The loopback set of rule 2 is unchanged** (ADR-0032 §5): the exact literals `127.0.0.1`,
+  `[::1]` and `localhost`, over `http`.
+- **An empty label and a label's edge hyphen stay accepted.** They are the host lists' own rule
+  (#630), not the URL settings'.
+
+The rule applies wherever rules 1–3 do:
+- **A new DCR registration** keeps the URIs that pass (the 2026-11-06 amendment).
+- **A stored DCR registration** is checked again on every lookup. One that holds a URI this rule
+  refuses is an unknown client, and the client registers again.
+- **A CIMD document** with one refused URI is refused whole.
+- **A static client** with one stops the configuration from loading.
+- **At `/authorize`**, a sent URI that breaks the rule gets the error page (rule 6).
+
+Why: the consent page names the host a redirect returns to. For an internationalized name it
+names one destination, the one non-transitional IDNA on current tables gives. A browser with
+transitional mapping, or with tables older than Unicode 15.1, can go to another for the deviation
+characters (`ß`, `ẞ`, `ς`, the joiners). Requiring the `xn--` form gives every browser the same
+host. The other refused forms name no host a browser goes to. No recorded client registers one
+(`internal/testutil/clientdocs`, #707).

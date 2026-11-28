@@ -55,6 +55,60 @@ func TestDocumentedClientRedirectsAreValidAndMatch(t *testing.T) {
 	}
 }
 
+// A registered redirect URI follows the URL settings' host rule (ADR-0032 §3, #707): its host holds
+// only ASCII letters, digits, - . and _ (an internationalized name in its xn-- form), and its port,
+// if any, is 1 to 65535 with no sign or leading zero. The loopback set is unchanged (ADR-0032 §5):
+// the exact literals, over http, on any such port. An empty label and an edge hyphen are the host
+// lists' own rule (#630), so they pass here. Each refusal names its reason, never the URI's host.
+func TestARedirectURIFollowsTheURLSettingsHostRule(t *testing.T) {
+	for _, tc := range []struct {
+		uri  string
+		want string // the refusal's reason, or "" when the URI passes
+	}{
+		{"http://localhost/cb", ""},
+		{"http://127.0.0.1/cb", ""},
+		{"http://[::1]/cb", ""},
+		{"http://localhost:1/cb", ""},
+		{"http://127.0.0.1:8080/cb", ""},
+		{"http://[::1]:65535/cb", ""},
+		{"http://localhost:0/cb", ReasonPort},
+		{"http://127.0.0.1:65536/cb", ReasonPort},
+		{"http://[::1]:080/cb", ReasonPort},
+		{"http://127.0.0.1:/cb", ReasonPort},  // a ":" with no port, which the URL settings refuse too
+		{"http://LOCALHOST/cb", ReasonScheme}, // the loopback set is exact (§5)
+		{"http://127.1/cb", ReasonScheme},
+		{"https://app.example/cb", ""},
+		{"https://app.example:8443/cb", ""},
+		{"https://my_app.example/cb", ""},
+		{"https://xn--bcher-kva.example/cb", ""},
+		{"https://app.example./cb", ""}, // a trailing dot: the host lists' rule, not this one
+		{"https://-app.example/cb", ""}, // an edge hyphen: likewise
+		{"https://app.example:0/cb", ReasonPort},
+		{"https://app.example:65536/cb", ReasonPort},
+		{"https://app.example:+443/cb", ReasonMalformed}, // url.Parse refuses a sign itself, as before
+		{"https://bücher.example/cb", ReasonHost},
+		{"https://xn--bcher-\u212Ava.example/cb", ReasonHost},
+		{"https://ev\u0130l.example/cb", ReasonHost},
+		{"https://fa\u00DF.example/cb", ReasonHost},
+		{"https://0\xb6\xb6.example/cb", ReasonHost},
+		{"https://app~x.example/cb", ReasonHost},
+		{"https://[fe80::1%25eth0]/cb", ReasonHost},
+		{"https://a\u200bb.example/cb", ReasonMalformed},  // an invisible character anywhere in the URI
+		{"https://app.example/c\u00a0b", ReasonMalformed}, // white space in the path, not only the host
+		{"https://app.example/c\u0085b", ReasonMalformed}, // a C1 control in the path
+		{"https://app.example/c\u200db", ReasonMalformed}, // an invisible character in the path
+	} {
+		var re *RedirectError
+		err := ValidateRedirect(tc.uri)
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%q: %v, want it to pass", tc.uri, err)
+		case tc.want != "" && (!errors.As(err, &re) || re.Reason != tc.want):
+			t.Errorf("%q: %v, want it refused with reason %q", tc.uri, err, tc.want)
+		}
+	}
+}
+
 func TestMatchRedirect(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

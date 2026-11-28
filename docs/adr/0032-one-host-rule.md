@@ -145,7 +145,7 @@ consent page's display of a client's site and its other-site warning. The refusa
 | **P, published** | `BYWARD_PUBLIC_URL` | Refused unless the host and port are written exactly in their canonical form: lower case, no default port, dotted-decimal IPv4, shortest IPv6. The refusal names the canonical form or the address read. Never rewritten. A single label and `localhost` are allowed. |
 | **B, browser-matched** | `BYWARD_ALLOWED_HOSTS`, `BYWARD_ALLOWED_ORIGINS`, the `Host` and `Origin` headers | Both sides parsed and compared in canonical form, ignoring one default port. Case and IPv6 spelling are folded on the setting side. A numeric IPv4 spelling and a name ending in a number are refused, naming what a browser reads. |
 | **S, server-matched names** | `BYWARD_CIMD_TRUSTED_HOSTS`, `BYWARD_CIMD_ALLOWED_HOSTS`, the client denylist's hosts, and the matching at request time | Both sides parsed. A setting must be a name with at least one dot. A setting's trailing dot stays refused (the denylist strips one, as on `main`); at request time a trailing dot on the host being checked is folded, so it matches the entry without one (A2). IDN names are folded (the denylist adds its transitional fold). |
-| **X, exact identifiers** | Redirect URIs, the OIDC issuer, client IDs, the assertion's `aud` | Not normalized; compared byte for byte. The loopback redirect set stays exact (§5). Only the `--dev` issuer relaxation asks `Parse(…).Loopback()`. |
+| **X, exact identifiers** | Redirect URIs, the OIDC issuer, client IDs, the assertion's `aud` | Not normalized; compared byte for byte. The loopback redirect set stays exact (§5). A redirect URI's host and port follow §3's characters and the URL settings' port rule (#707). Only the `--dev` issuer relaxation asks `Parse(…).Loopback()`. |
 | **O, operator addresses** | `BYWARD_UPSTREAM_URL`, `BYWARD_LISTEN`, `BYWARD_INTERNAL_LISTEN`, `BYWARD_TRUSTED_PROXIES`, `X-Forwarded-For` | The host part of `BYWARD_UPSTREAM_URL`, `BYWARD_LISTEN` and `BYWARD_INTERNAL_LISTEN` takes the character rule of §3 (slice 2, #522); otherwise these are left to Go's dialer, and the trusted proxies and `X-Forwarded-For` to netip. Only the no-auth loopback check asks `Parse(…).Loopback()`. |
 
 _Amended 2026-11-26 (#524):_ "IDN names are folded" in class S means the settings' `xn--` form and the
@@ -188,7 +188,9 @@ is not up to 5 digits) gets 421, where some of these passed before.
 Every host setting in classes P, B, S and O accepts ASCII letters, digits, `-`, `.` and `_` in a
 host name, and refuses `~ ! $ & ' ( ) * + , ; =` and `%`. An internationalised name is written in
 its `xn--` form. Class X is not refused by this set: its identifiers come from clients and the IdP
-and are compared exactly (§2).
+and are compared exactly (§2). The exception is a redirect URI's host: since #707 it follows this set,
+and its port the URL settings' port rule (ADR-0009, amendment 2026-11-28). It is still compared
+exactly, and §5 still holds.
 
 - **The refused characters are allowed by RFC 3986 and by browsers** (WHATWG §3.2; `~` and `$`
   parse in Node). No DNS name uses them, and refusing them keeps a pasted secret out of the host:

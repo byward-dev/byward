@@ -349,23 +349,23 @@ by port:
 refused because:
     233  denied
 
-## denylist redirect: 21163 pass, 169 refused, of 21332
+## denylist redirect: 21292 pass, 40 refused, of 21332
 by family:
-  name                     pass  2019  refused    33
-  name edge                pass  4994  refused    22
+  name                     pass  2034  refused    18
+  name edge                pass  5004  refused    12
   near miss                pass  1368  refused     0
-  idn                      pass  1302  refused    66
+  idn                      pass  1362  refused     6
   ipv4                     pass  1140  refused     0
   ipv4 spelling            pass  2052  refused     0
   ipv6                     pass  1596  refused     0
   ipv4-mapped              pass   684  refused     0
   zone                     pass  3074  refused     0
-  invisible                pass  1118  refused    22
+  invisible                pass  1140  refused     0
   not UTF-8                pass   912  refused     0
-  unicode fold             pass   890  refused    22
+  unicode fold             pass   912  refused     0
   url shape                pass    14  refused     4
 by wrap:
-  bare                     pass  3367  refused   165
+  bare                     pass  3496  refused    36
   [h]                      pass  3534  refused     0
   [h                       pass  3532  refused     0
   h]                       pass  3572  refused     0
@@ -390,17 +390,17 @@ by wrap:
   white space              pass     1  refused     0
   backslash                pass     1  refused     0
 by port:
-  none                     pass  1103  refused    15
-  :                        pass  1107  refused    15
-  :443                     pass  1107  refused    15
-  :80                      pass  1107  refused    15
-  :8080                    pass  1107  refused    15
-  :9090                    pass  1107  refused    15
-  :65535                   pass  1107  refused    15
-  :0                       pass  1107  refused    15
-  :65536                   pass  1107  refused    15
-  :123456                  pass  1107  refused    15
-  :080                     pass  1107  refused    15
+  none                     pass  1112  refused     6
+  :                        pass  1122  refused     0
+  :443                     pass  1116  refused     6
+  :80                      pass  1116  refused     6
+  :8080                    pass  1116  refused     6
+  :9090                    pass  1116  refused     6
+  :65535                   pass  1116  refused     6
+  :0                       pass  1122  refused     0
+  :65536                   pass  1122  refused     0
+  :123456                  pass  1122  refused     0
+  :080                     pass  1122  refused     0
   :+80                     pass  1122  refused     0
   :-1                      pass  1122  refused     0
   :0x50                    pass  1122  refused     0
@@ -411,30 +411,30 @@ by port:
   :80]                     pass  1122  refused     0
   -                        pass    14  refused     4
 refused because:
-    169  denied
+     40  denied
 
-## redirect URI: 1631 pass, 19701 refused, of 21332
+## redirect URI: 391 pass, 20941 refused, of 21332
 by family:
-  name                     pass   209  refused  1843
-  name edge                pass   379  refused  4637
-  near miss                pass   132  refused  1236
-  idn                      pass   132  refused  1236
-  ipv4                     pass   121  refused  1019
-  ipv4 spelling            pass   198  refused  1854
-  ipv6                     pass    94  refused  1502
-  ipv4-mapped              pass    34  refused   650
-  zone                     pass    41  refused  3033
-  invisible                pass   110  refused  1030
-  not UTF-8                pass    88  refused   824
-  unicode fold             pass    88  refused   824
-  url shape                pass     5  refused    13
+  name                     pass    60  refused  1992
+  name edge                pass   122  refused  4894
+  near miss                pass    36  refused  1332
+  idn                      pass     6  refused  1362
+  ipv4                     pass    36  refused  1104
+  ipv4 spelling            pass    54  refused  1998
+  ipv6                     pass    54  refused  1542
+  ipv4-mapped              pass    19  refused   665
+  zone                     pass     0  refused  3074
+  invisible                pass     0  refused  1140
+  not UTF-8                pass     0  refused   912
+  unicode fold             pass     0  refused   912
+  url shape                pass     4  refused    14
 by wrap:
-  bare                     pass   734  refused  2798
-  [h]                      pass   134  refused  3400
-  [h                       pass     9  refused  3523
-  h]                       pass   723  refused  2849
-  [h]]                     pass    24  refused  3548
-  [h]x                     pass     2  refused  3570
+  bare                     pass   295  refused  3237
+  [h]                      pass    66  refused  3468
+  [h                       pass     7  refused  3525
+  h]                       pass    19  refused  3553
+  [h]]                     pass     0  refused  3572
+  [h]x                     pass     0  refused  3572
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -448,23 +448,23 @@ by wrap:
   another scheme           pass     0  refused     1
   no scheme                pass     0  refused     1
   zone and user            pass     0  refused     1
-  zone and query           pass     1  refused     0
+  zone and query           pass     0  refused     1
   zone in a path           pass     1  refused     0
   escaped bracket          pass     0  refused     1
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   145  refused   973
-  :                        pass   145  refused   977
-  :443                     pass   145  refused   977
-  :80                      pass   145  refused   977
-  :8080                    pass   145  refused   977
-  :9090                    pass   145  refused   977
-  :65535                   pass   145  refused   977
-  :0                       pass   145  refused   977
-  :65536                   pass   145  refused   977
-  :123456                  pass   145  refused   977
-  :080                     pass   145  refused   977
+  none                     pass    59  refused  1059
+  :                        pass     2  refused  1120
+  :443                     pass    59  refused  1063
+  :80                      pass    59  refused  1063
+  :8080                    pass    59  refused  1063
+  :9090                    pass    59  refused  1063
+  :65535                   pass    59  refused  1063
+  :0                       pass     2  refused  1120
+  :65536                   pass     2  refused  1120
+  :123456                  pass     2  refused  1120
+  :080                     pass     2  refused  1120
   :+80                     pass     2  refused  1120
   :-1                      pass     2  refused  1120
   :0x50                    pass     2  refused  1120
@@ -472,22 +472,24 @@ by port:
   :８０                      pass     2  refused  1120
   :80:80                   pass     2  refused  1120
   :80:443                  pass     2  refused  1120
-  :80]                     pass    17  refused  1105
-  -                        pass     5  refused    13
+  :80]                     pass     9  refused  1113
+  -                        pass     4  refused    14
 refused because:
-  17634  malformed
+  17744  malformed
    1562  scheme
+    650  port
+    480  host
     456  wildcard
      47  userinfo
       2  fragment
 
-## loopback redirect: 11 pass, 21321 refused, of 21332
+## loopback redirect: 6 pass, 21326 refused, of 21332
 by family:
   name                     pass     0  refused  2052
   name edge                pass     0  refused  5016
   near miss                pass     0  refused  1368
   idn                      pass     0  refused  1368
-  ipv4                     pass    11  refused  1129
+  ipv4                     pass     6  refused  1134
   ipv4 spelling            pass     0  refused  2052
   ipv6                     pass     0  refused  1596
   ipv4-mapped              pass     0  refused   684
@@ -497,7 +499,7 @@ by family:
   unicode fold             pass     0  refused   912
   url shape                pass     0  refused    18
 by wrap:
-  bare                     pass    11  refused  3521
+  bare                     pass     6  refused  3526
   [h]                      pass     0  refused  3534
   [h                       pass     0  refused  3532
   h]                       pass     0  refused  3572
@@ -523,16 +525,16 @@ by wrap:
   backslash                pass     0  refused     1
 by port:
   none                     pass     1  refused  1117
-  :                        pass     1  refused  1121
+  :                        pass     0  refused  1122
   :443                     pass     1  refused  1121
   :80                      pass     1  refused  1121
   :8080                    pass     1  refused  1121
   :9090                    pass     1  refused  1121
   :65535                   pass     1  refused  1121
-  :0                       pass     1  refused  1121
-  :65536                   pass     1  refused  1121
-  :123456                  pass     1  refused  1121
-  :080                     pass     1  refused  1121
+  :0                       pass     0  refused  1122
+  :65536                   pass     0  refused  1122
+  :123456                  pass     0  refused  1122
+  :080                     pass     0  refused  1122
   :+80                     pass     0  refused  1122
   :-1                      pass     0  refused  1122
   :0x50                    pass     0  refused  1122
@@ -543,22 +545,24 @@ by port:
   :80]                     pass     0  refused  1122
   -                        pass     0  refused    18
 refused because:
-  17634  malformed
-   1620  not_registered
+  17744  malformed
    1562  scheme
+    650  port
+    480  host
     456  wildcard
+    385  not_registered
      47  userinfo
       2  fragment
 
-## consent redirect key: 27 pass, 21305 refused, of 21332
+## consent redirect key: 15 pass, 21317 refused, of 21332
 by family:
-  name                     pass     9  refused  2043
+  name                     pass     5  refused  2047
   name edge                pass     0  refused  5016
   near miss                pass     0  refused  1368
   idn                      pass     0  refused  1368
-  ipv4                     pass     9  refused  1131
+  ipv4                     pass     5  refused  1135
   ipv4 spelling            pass     0  refused  2052
-  ipv6                     pass     9  refused  1587
+  ipv6                     pass     5  refused  1591
   ipv4-mapped              pass     0  refused   684
   zone                     pass     0  refused  3074
   invisible                pass     0  refused  1140
@@ -566,8 +570,8 @@ by family:
   unicode fold             pass     0  refused   912
   url shape                pass     0  refused    18
 by wrap:
-  bare                     pass    18  refused  3514
-  [h]                      pass     9  refused  3525
+  bare                     pass    10  refused  3522
+  [h]                      pass     5  refused  3529
   [h                       pass     0  refused  3532
   h]                       pass     0  refused  3572
   [h]]                     pass     0  refused  3572
@@ -598,10 +602,10 @@ by port:
   :8080                    pass     3  refused  1119
   :9090                    pass     3  refused  1119
   :65535                   pass     3  refused  1119
-  :0                       pass     3  refused  1119
-  :65536                   pass     3  refused  1119
-  :123456                  pass     3  refused  1119
-  :080                     pass     3  refused  1119
+  :0                       pass     0  refused  1122
+  :65536                   pass     0  refused  1122
+  :123456                  pass     0  refused  1122
+  :080                     pass     0  refused  1122
   :+80                     pass     0  refused  1122
   :-1                      pass     0  refused  1122
   :0x50                    pass     0  refused  1122
@@ -612,4 +616,4 @@ by port:
   :80]                     pass     0  refused  1122
   -                        pass     0  refused    18
 refused because:
-  21305  compared as written
+  21317  compared as written

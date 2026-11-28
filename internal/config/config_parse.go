@@ -119,7 +119,7 @@ func parseResourceDocumentation(val Value) (string, error) {
 
 // ParseUpstreamURL validates the HTTP upstream's URL as the proxy reads BYWARD_UPSTREAM_URL, as
 // `byward init entra` also needs it: an absolute http(s) URL whose host name has letters, digits, - .
-// and _ only (nameCharReason, ADR-0032 §3), and no IPv6 address with a zone (urlZoneReason); the rest
+// and _ only (host.NameCharReason, ADR-0032 §3), and no IPv6 address with a zone (urlZoneReason); the rest
 // of the host is left to Go's dialer.
 // It names the setting by its variable: its caller (`byward init`) passes only the text.
 func ParseUpstreamURL(raw string) (*url.URL, error) {
@@ -134,7 +134,7 @@ func parseUpstreamURL(val Value) (*url.URL, error) {
 	if err != nil {
 		return nil, err
 	}
-	if reason := nameCharReason(u.Hostname()); reason != "" {
+	if reason := host.NameCharReason(u.Hostname()); reason != "" {
 		return nil, refusedForm(val, whole, raw, "an absolute http(s) URL such as "+example, "its host "+reason)
 	}
 	return u, nil
@@ -328,11 +328,6 @@ func parseOrigin(o string) (*url.URL, string) {
 	return u, ""
 }
 
-// reasonNotASCII is why a host with a non-ASCII character is refused. Browsers and MCP clients send
-// an internationalized host in its ASCII (xn--) form in Host, Origin and every URL they compare
-// (WHATWG URL "domain to ASCII", RFC 6454 §7.3), so a Unicode host here could never match them.
-const reasonNotASCII = "holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send"
-
 // notASCII reports whether s holds a character that is not ASCII.
 func notASCII(s string) bool { return strings.ContainsFunc(s, func(r rune) bool { return r >= 0x80 }) }
 
@@ -341,12 +336,12 @@ func notASCII(s string) bool { return strings.ContainsFunc(s, func(r rune) bool 
 const reasonEmptyLabel = "has an empty label (a leading, double or trailing dot); drop the extra dot"
 
 // nameReason says why name, a host, breaks the host name rule (ADR-0032 §3): a character no host name
-// holds (nameCharReason), an empty label, or a label that starts or ends with a hyphen (#630),
+// holds (host.NameCharReason), an empty label, or a label that starts or ends with a hyphen (#630),
 // completing "it …" or "its host:port …"; "" when it keeps the rule, or is an IP address. Every host
 // setting but the upstream URL takes it: the browser-matched ones (hostPort), the server-matched ones
 // (hostNameReason) and the listen addresses (validHostName).
 func nameReason(name string) string {
-	switch reason := nameCharReason(name); {
+	switch reason := host.NameCharReason(name); {
 	case reason != "":
 		return reason
 	case host.HasEmptyLabel(name):
@@ -374,7 +369,7 @@ const hostPortForms = "give host, host:port, an IPv6 address, [IPv6] or [IPv6]:p
 // and no IPv6 zone.
 func hostPort(h string) (stored, reason string) {
 	if notASCII(h) {
-		return "", reasonNotASCII
+		return "", host.ReasonNotASCII
 	}
 	if strings.ContainsAny(h, "/ ") {
 		return "", `holds a "/" or a space; ` + hostPortForms
@@ -466,7 +461,7 @@ var ipv6Reason = host.ErrIPv6.Error()
 
 // parseListen reads a listen address setting: host:port, the host empty, an IP address (an IPv6 one
 // may have a zone, as for a link-local address) or a host name (validHostName, one trailing dot
-// allowed, and letters, digits, - . and _ only: nameCharReason, ADR-0032 §3), the port a
+// allowed, and letters, digits, - . and _ only: host.NameCharReason, ADR-0032 §3), the port a
 // number from 0 to 65535, as net.Listen takes it. Brackets enclose an IPv6 address alone (RFC 3986
 // §3.2.2), as host.Parse requires (#629): net.SplitHostPort strips them from a name, an IPv4
 // address or nothing too, so such a value is almost certainly a typo, and []:80 would listen on
@@ -474,12 +469,12 @@ var ipv6Reason = host.ErrIPv6.Error()
 // address is never shown (ADR-0031 §1): net.Listen's own error would quote it.
 func parseListen(val Value, want string) (string, error) {
 	raw := val.Given.raw()
-	host, port, err := net.SplitHostPort(raw)
-	_, ipErr := netip.ParseAddr(host) // an IPv6 address may have a zone, as a link-local one needs
+	hostname, port, err := net.SplitHostPort(raw)
+	_, ipErr := netip.ParseAddr(hostname) // an IPv6 address may have a zone, as a link-local one needs
 	charReason, zone, zoned := "", "", false
-	if !strings.Contains(host, ":") { // an IPv6 host is no name; a bad one is neither, below
-		charReason = nameCharReason(host)
-	} else if addr, z, ok := strings.Cut(host, "%"); ok {
+	if !strings.Contains(hostname, ":") { // an IPv6 host is no name; a bad one is neither, below
+		charReason = host.NameCharReason(hostname)
+	} else if addr, z, ok := strings.Cut(hostname, "%"); ok {
 		if a, err := netip.ParseAddr(addr); err == nil && a.Is6() { // a zone only on an IPv6 address
 			zone, zoned = z, true
 		}
@@ -488,13 +483,13 @@ func parseListen(val Value, want string) (string, error) {
 	switch {
 	case err != nil:
 		reason = "it is not host:port"
-	case strings.HasPrefix(raw, "[") && !strings.Contains(host, ":"):
+	case strings.HasPrefix(raw, "[") && !strings.Contains(hostname, ":"):
 		reason = "it " + bracketsReason
 	case zoned && !validInterfaceName(zone):
 		reason = "it " + zoneReason
 	case charReason != "":
 		reason = "its host " + charReason
-	case host != "" && !validHostName(strings.TrimSuffix(host, ".")) && ipErr != nil:
+	case hostname != "" && !validHostName(strings.TrimSuffix(hostname, ".")) && ipErr != nil:
 		reason = "it has a host that is neither an IP address nor a host name"
 	case !isDigits(port):
 		reason = "it has a port that is not a number"

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Kind is what a parsed host is: a name, an IPv4 address or an IPv6 address.
@@ -73,6 +74,29 @@ func BadNameChar(name string) int {
 	}
 	return 0
 }
+
+// NameCharReason says why name, a host, is refused for a character no host name holds (ADR-0032 §3:
+// only ASCII letters, digits, "-", "." and "_"; an internationalized name in its xn-- form), completing
+// "its host …"; "" when it holds none, or is an IP address (BadNameChar), whose ":" is an IPv6
+// address's, not a name's. It names the character's place, or says the name is not ASCII; never the character
+// or the host, which a secret may be. The URL settings that take a host name (config) and a registered
+// redirect URI (registration, #707) take it.
+func NameCharReason(name string) string {
+	place := BadNameChar(name)
+	switch {
+	case place == 0:
+		return ""
+	case strings.ContainsFunc(name, func(r rune) bool { return r >= utf8.RuneSelf }): // told its xn-- form, wherever its first bad character is
+		return ReasonNotASCII
+	}
+	return fmt.Sprintf("has a character no host name holds at position %d; a host name has only letters, digits, - . and _", place)
+}
+
+// ReasonNotASCII is why a host with a non-ASCII character is refused. Browsers and MCP clients send
+// an internationalized host in its ASCII (xn--) form in Host, Origin and every URL they compare
+// (WHATWG URL "domain to ASCII", RFC 6454 §7.3), so a Unicode host could never match them. A byte
+// that is not UTF-8 reads as U+FFFD, so it is refused as not ASCII too.
+const ReasonNotASCII = "holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send"
 
 // HasEmptyLabel reports whether name has an empty label: it starts or ends with a dot, or holds two
 // in a row. A trailing dot names the root, so example.com. is not example.com (WHATWG URL §3.1).

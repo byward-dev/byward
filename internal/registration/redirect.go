@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/logging"
 )
 
@@ -27,6 +28,8 @@ const (
 	ReasonWildcard      = "wildcard"
 	ReasonTooLong       = "too_long"
 	ReasonDenied        = "denied" // the operator's denylist names a host the app returns to (ADR-0008 §9)
+	ReasonHost          = "host"   // the host breaks the URL settings' host rule (ADR-0032 §3, #707)
+	ReasonPort          = "port"   // the port is not 1 to 65535 as a URL writes it (#707)
 )
 
 // RedirectError explains a rejected redirect URI. Error() is for the error page ("registered X,
@@ -67,6 +70,8 @@ var reasonText = map[string]string{
 	ReasonWildcard:  "must not contain wildcards",
 	ReasonTooLong:   fmt.Sprintf("longer than %d characters", MaxRedirectURILen),
 	ReasonDenied:    "the app returns to a host on the operator's denylist",
+	ReasonHost:      "its host must hold only ASCII letters, digits, - . and _ (an internationalized name in its xn-- form), and no IPv6 zone",
+	ReasonPort:      "its port must be a number from 1 to 65535 without a sign or leading zero",
 }
 
 // RedirectKey is a redirect URI as a remembered consent compares it (ADR-0010 §3): exact, except
@@ -88,7 +93,8 @@ func RedirectKey(uri string) string {
 // loopbackHosts are the hosts on which http and any port are allowed (ADR-0009 §2).
 var loopbackHosts = map[string]bool{"127.0.0.1": true, "::1": true, "localhost": true}
 
-// ValidateRedirect checks one redirect URI against ADR-0009 §1-3 and §7.
+// ValidateRedirect checks one redirect URI against ADR-0009 §1-3 and §7, and its host and port against
+// the URL settings' host rule (ADR-0032 §3, #707).
 func ValidateRedirect(raw string) error {
 	_, err := parseRedirect(raw)
 	return err
@@ -128,6 +134,21 @@ func parseRedirect(raw string) (*url.URL, error) {
 		}
 	default:
 		return reject(ReasonScheme)
+	}
+	// The URL settings' host rule, as BYWARD_UPSTREAM_URL takes it (#707): host.URLReason whole, then
+	// the host name's characters. The loopback set above is unchanged (ADR-0032 §5), its ports now 1 to
+	// 65535 too; an empty label or an edge hyphen is the host lists' own rule (#630), not this one.
+	switch _, reason := host.URLReason(raw); reason {
+	case "":
+	case host.PortReason:
+		return reject(ReasonPort)
+	case host.URLZoneReason:
+		return reject(ReasonHost)
+	default: // white space, a control or invisible character anywhere in the URI, or a host url.Parse took
+		return reject(ReasonMalformed)
+	}
+	if host.NameCharReason(u.Hostname()) != "" {
+		return reject(ReasonHost)
 	}
 	return u, nil
 }
