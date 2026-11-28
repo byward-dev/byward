@@ -103,7 +103,7 @@ list. Status on `main`:
 | 6 | Audience validated; authorization responses carry `iss`. | Resource URL as associated data (`internal/token/token.go`); `iss` on success and error redirects (`internal/broker/authorize.go`) | `TestTokenForOneResourceNeverOpensForAnother`, `TestStaticClientSignsInWithEntraAndGetsAProxyToken` |
 | 7 | Proxy tokens are sealed by us (AEAD; key ID from our key ring; resource URL and token type as associated data), carry `exp`, and are never IdP tokens; assertions to the upstream are JWTs with `aud` = that upstream and a `kid` in our JWKS (ADR-0016). | `internal/token/token.go`; assertions: `internal/assertion` (ES256, `aud` = the upstream, `kid` in our JWKS) | `TestTypesNeverCross`, `TestAnyTamperedByteIsRejected`, `TestTheUpstreamGetsAnAssertionItCanVerifyInsteadOfTheClientsToken`, `TestGoSDKBearerMiddlewareAcceptsTheAssertion` |
 | 8 | The IdP refresh token never leaves the **broker** and is encrypted at rest. | Sealed with the `idp-tokens` box (`internal/server/wire_parts.go`, `internal/broker/authorize.go`) | `TestUnusableStoredIdPTokensRevokeTheGrant` |
-| 9 | Authorization codes are single-use and short-lived; `/token` re-checks `client_id`, `redirect_uri`, PKCE. | `internal/broker/token.go` (`redeemCode`); 60 s lifetime | `TestReusedCodeRevokesTheGrant`, `TestTokenEndpointRechecks`, `TestFailedBindingAfterConsumeRevokesTheGrant`, `TestExpiredCodeIsRejected` |
+| 9 | Authorization codes are single-use and short-lived; `/token` re-checks `client_id`, `redirect_uri`, PKCE. | `internal/broker/token.go` (`redeemCode`); 60 s lifetime | `TestReusedCodeRevokesTheGrant`, `TestTokenEndpointRechecks`, `TestFailedBindingAfterConsumeRevokesTheGrant`, `TestExpiredCodeIsRejected`, `TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore` |
 | 10 | Exact redirect matching; only the loopback port may vary. | `internal/registration/redirect.go` | `TestMatchRedirect`, `FuzzMatchRedirect` |
 | 11 | Keys come from the operator; never derived from the IdP client secret; never ephemeral across replicas; rotation keeps verify-only keys. | `internal/token/keyring.go` (directory of key files; startup fails without one) | `TestMissingOrEmptyKeyDirectoryRefusesToStart`, `TestRotationKeepsOldTokensUntilTheirKeyIsRemoved` |
 | 12 | Every relaxation is an explicit flag, logged at startup. | `internal/config/config.go` (`Relaxations`), `cmd/byward/main.go` (startup), `cmd/byward/operate.go` (`check --offline`) | `TestDevModeLogsEachRelaxation`, `TestDevModeLogsAnHTTPIdPIssuerOnLoopback`, `TestNoAuthLogsThatAuthIsOffAndTheNextStep`, `TestCheckOfflinePrintsEachRelaxationFirst`, `TestOnlyKnownCodeReadsDevelopmentMode`, `TestTheIdPAdapterIsRelaxedOnlyByTheRecordedRelaxation` |
@@ -179,6 +179,12 @@ bounds, but there are no settings for that yet.
   has not synced yet (`internal/denylist/denylist.go`).
 - `/revoke` revokes the whole grant, whichever of its tokens was sent. A store failure gets 503,
   never a false 200.
+- A revocation finishes in the store even when its request ends, as its client going away or the
+  proxy's shutdown. That covers one the broker detects (a reused code or refresh token, a wrong
+  binding, a denied or refused client) and one a client asks for at `/revoke`. Its store calls run
+  detached from the request, bounded at 5 s. Before #693, a SQL store failed a revocation left on
+  an ended request: the grant stayed live on every replica and its refresh tokens kept working,
+  and only this replica's deny list stopped its access tokens.
 - The operator commands `byward revoke-user <user key>` and `byward revoke-all --yes` delete the
   grants and record a cut-off in the store, beside a running proxy. Every proxy using the store
   refuses those users' tokens at its next sync (`internal/server/revoke.go`). A cut-off for every

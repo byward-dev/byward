@@ -358,17 +358,23 @@ func (b *Broker) revokeForRefusedCode(r *http.Request, clientID string, now time
 	if err != nil {
 		return
 	}
-	g, err := b.cfg.Store.Grant(r.Context(), claims.GrantID)
+	ctx, cancel := detached(r.Context()) // the revocation's lookup finishes whatever the request's end (#693)
+	defer cancel()
+	g, err := b.cfg.Store.Grant(ctx, claims.GrantID)
 	if err != nil || g.ClientID != clientID {
 		return
 	}
 	b.revoke(r, clientID, g.ID, now, why)
 }
 
-// revoke ends a grant (store and deny list) and logs why, on one line with attrs. A store failure is
-// logged: the deny list still ends the grant's access tokens on this replica.
+// revoke ends a grant (store and deny list) and logs why, on one line with attrs. The store write is
+// detached: a revocation detected on a request whose client then goes away, or that shutdown ends,
+// still reaches the store, so the grant ends on every replica and its refresh tokens stop, not only
+// its access tokens on this replica (#693). A store failure is logged: the deny list still ends the
+// grant's access tokens on this replica.
 func (b *Broker) revoke(r *http.Request, clientID, grantID string, now time.Time, why string, attrs ...any) {
-	ctx := r.Context()
+	ctx, cancel := detached(r.Context())
+	defer cancel()
 	if err := b.cfg.Store.RevokeGrant(ctx, grantID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 		b.cfg.Log.ErrorContext(ctx, "revoking a grant failed", "error", err)
 	}
@@ -450,6 +456,18 @@ func (b *Broker) unavailable(w http.ResponseWriter, r *http.Request, what string
 	b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy's store is unavailable; try again"})
 }
 
+// detachedTimeout bounds a store call that finishes whatever its request's end (detached). It is
+// far inside the server's shutdown grace, so a shutdown waits for it (ADR-0018 §9).
+const detachedTimeout = 5 * time.Second
+
+// detached is ctx without its end, bounded by detachedTimeout, for a store call that must finish
+// even if the request's client goes away or the proxy shuts down: a grant's revocation and the
+// lookup it needs, and the writes that keep a grant's IdP tokens or a client's registration (#693).
+// It keeps ctx's values, so its logs keep the request's reference.
+func detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), detachedTimeout)
+}
+
 // useRecorder is a client whose registration slides with use (a DCR client).
 type useRecorder interface {
 	RecordUse(ctx context.Context, now time.Time) error
@@ -458,6 +476,8 @@ type useRecorder interface {
 // recordUse renews a DCR client's registration after a code redemption or a refresh; a failure is
 // logged, never a reason to fail the token request.
 func (b *Broker) recordUse(ctx context.Context, client registration.Client, now time.Time) {
+	ctx, cancel := detached(ctx) // the client did authenticate: its registration slides whatever the request's end (#693)
+	defer cancel()
 	if u, ok := client.(useRecorder); ok {
 		if err := u.RecordUse(ctx, now); err != nil {
 			b.cfg.Log.WarnContext(ctx, "renewing a client registration failed", "client_id", client.ID(), "error", err.Error())

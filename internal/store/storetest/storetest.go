@@ -87,6 +87,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"SetIdPTokensAfterARevocationNeverRestoresTheConsent", setIdPTokensAfterARevocationNeverRestoresTheConsent},
 		{"RevokeSubjectAndRevokeAllForgetConsentsBeforeTheCutOff", revokeSubjectAndRevokeAllForgetConsentsBeforeTheCutOff},
 		{"CollectRemovesExpiredConsentsAndAnExpiredGrantForgetsNothing", collectRemovesExpiredConsentsAndAnExpiredGrantForgetsNothing},
+		{"CallsUnderAnEndedContextFailAndChangeNothing", callsUnderAnEndedContextFailAndChangeNothing},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, newStore(t)) })

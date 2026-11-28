@@ -221,9 +221,6 @@ func (b *Broker) sealIdPTokens(ctx context.Context, g store.Grant, t idp.Tokens,
 	return []byte(sealed), nil
 }
 
-// keepIdPTokensTimeout bounds the detached store write in keepIdPTokens.
-const keepIdPTokensTimeout = 5 * time.Second
-
 // CallbackTimeout bounds a callback once it has spent its login: the IdP's code exchange and every
 // step after it run detached from the request, which cannot be retried (the login and the IdP's
 // code are both spent). It is below the server's shutdown grace, so a shutdown waits for it
@@ -237,7 +234,7 @@ func (b *Broker) keepIdPTokens(r *http.Request, grantID string, sealed []byte) {
 	ctx := r.Context()
 	// Detached from cancellation: a client that gave up is a common reason the refresh failed, and
 	// the IdP has already spent the old token either way.
-	keep, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepIdPTokensTimeout)
+	keep, cancel := detached(ctx)
 	defer cancel()
 	if err := b.cfg.Store.SetIdPTokens(keep, grantID, sealed); err != nil && !errors.Is(err, store.ErrNotFound) {
 		b.cfg.Log.WarnContext(ctx, "keeping the IdP's new tokens failed", "error", err)
@@ -280,7 +277,9 @@ func (b *Broker) revokeForRefusedRefresh(r *http.Request, clientID string, now t
 	if !ok {
 		return
 	}
-	rt, err := b.cfg.Store.RefreshToken(r.Context(), hash, now)
+	ctx, cancel := detached(r.Context()) // the revocation's lookup finishes whatever the request's end (#693)
+	defer cancel()
+	rt, err := b.cfg.Store.RefreshToken(ctx, hash, now)
 	if err != nil || rt.ClientID != clientID {
 		return
 	}

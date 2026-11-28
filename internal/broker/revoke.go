@@ -49,7 +49,10 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_request", "token is required"})
 		return
 	}
-	ctx := r.Context()
+	// Detached: a revocation whose form was read finishes whatever the request's end, so a client
+	// that goes away, or a shutdown, cannot leave the grant live in the store (#693).
+	ctx, cancel := detached(r.Context())
+	defer cancel()
 	grantID, owner, err := b.tokenGrant(ctx, tok, now)
 	if err != nil {
 		b.unavailable(w, r, "looking up a token to revoke failed", err)
@@ -75,7 +78,9 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 // as the client asked and as a refresh by the same client would end it. Only the token's own
 // client's grant is revoked; a store failure leaves it to the next request.
 func (b *Broker) revokeForRefusedRevocation(r *http.Request, clientID string, now time.Time, why string) {
-	grantID, owner, err := b.tokenGrant(r.Context(), r.PostForm.Get("token"), now)
+	ctx, cancel := detached(r.Context()) // the revocation's lookup finishes whatever the request's end (#693)
+	defer cancel()
+	grantID, owner, err := b.tokenGrant(ctx, r.PostForm.Get("token"), now)
 	if err != nil || grantID == "" || owner != clientID {
 		return
 	}

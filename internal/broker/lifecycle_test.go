@@ -364,6 +364,7 @@ func TestARefusedClientWhoseRequestEndedStillLosesItsGrant(t *testing.T) {
 				tokens := c.tokens(t, c.signIn(t))
 				grantID := c.onlyGrant(t)
 				c.refuse()
+				c.e.st.SQLContext() // a call under the ended context fails, as on a SQL store (#693)
 				f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {c.d.ClientID}}
 				c.e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
 				c.wantOneRevocation(t, grantID)
