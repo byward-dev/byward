@@ -456,16 +456,18 @@ func (b *Broker) unavailable(w http.ResponseWriter, r *http.Request, what string
 	b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy's store is unavailable; try again"})
 }
 
-// detachedTimeout bounds a store call that finishes whatever its request's end (detached). It is
-// far inside the server's shutdown grace, so a shutdown waits for it (ADR-0018 §9).
-const detachedTimeout = 5 * time.Second
+// DetachedTimeout bounds a store call that finishes whatever its request's end (detached). A request
+// may make two in a row (a refused client's lookup, then its revocation), so twice it is inside the
+// server's shutdown grace, and a shutdown waits for them while the store is still open (ADR-0018
+// §9; internal/server pins it).
+const DetachedTimeout = 5 * time.Second
 
-// detached is ctx without its end, bounded by detachedTimeout, for a store call that must finish
+// detached is ctx without its end, bounded by DetachedTimeout, for a store call that must finish
 // even if the request's client goes away or the proxy shuts down: a grant's revocation and the
 // lookup it needs, and the writes that keep a grant's IdP tokens or a client's registration (#693).
 // It keeps ctx's values, so its logs keep the request's reference.
 func detached(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), detachedTimeout)
+	return context.WithTimeout(context.WithoutCancel(ctx), DetachedTimeout)
 }
 
 // useRecorder is a client whose registration slides with use (a DCR client).

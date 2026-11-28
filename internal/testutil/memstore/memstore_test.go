@@ -8,19 +8,23 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/storetest"
 )
 
 var errBoom = errors.New("errBoom")
 
 // call invokes store.Store method name on s with zero arguments (a live context) and returns the
 // error it returns last.
-func call(s *Store, name string) error {
+func call(s *Store, name string) error { return callIn(s, context.Background(), name) }
+
+// callIn is call with ctx as the method's context.
+func callIn(s *Store, ctx context.Context, name string) error {
 	m := reflect.ValueOf(s).MethodByName(name)
 	args := make([]reflect.Value, m.Type().NumIn())
 	for i := range args {
 		in := m.Type().In(i)
 		if in == reflect.TypeFor[context.Context]() {
-			args[i] = reflect.ValueOf(context.Background())
+			args[i] = reflect.ValueOf(ctx)
 		} else {
 			args[i] = reflect.Zero(in)
 		}
@@ -58,6 +62,16 @@ func TestEveryMethodHonoursFailAndDown(t *testing.T) {
 	}
 }
 
+// AfterCall refuses a name that is not a store.Store method, so a typo cannot hook nothing.
+func TestAfterCallRefusesAnUnknownMethod(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("AfterCall with an unknown method name did not panic")
+		}
+	}()
+	New().AfterCall("Grnat", func() {})
+}
+
 // A name that is not a store.Store method is refused, so a typo cannot silently inject nothing.
 func TestFailRefusesAnUnknownMethod(t *testing.T) {
 	defer func() {
@@ -91,11 +105,45 @@ func TestTheEmbeddedStoreBypassesFailuresAndHooksSeeGrants(t *testing.T) {
 	}
 }
 
-// SetIdPTokens fails on a cancelled context, as the SQL store does.
-func TestSetIdPTokensFailsOnACancelledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+// Every store.Store method ignores an ended context by default and fails under one with SQLContext,
+// and runs its own AfterCall hook (and no other method's) once it returns, so a wrapper that passes
+// the wrong context, or names the wrong method, fails here (#693).
+func TestEveryMethodHonoursSQLContextAndAfterCall(t *testing.T) {
+	ended, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := New().SetIdPTokens(ctx, "g1", nil); !errors.Is(err, context.Canceled) {
-		t.Fatalf("err %v, want context.Canceled", err)
+	iface := reflect.TypeFor[store.Store]()
+	for i := range iface.NumMethod() {
+		name := iface.Method(i).Name
+		t.Run(name, func(t *testing.T) {
+			s := New()
+			if err := callIn(s, ended, name); errors.Is(err, context.Canceled) {
+				t.Errorf("%s under an ended context, by default: %v, want the ending ignored", name, err)
+			}
+			s.SQLContext()
+			if err := callIn(s, ended, name); !errors.Is(err, context.Canceled) {
+				t.Errorf("%s under an ended context, with SQLContext: %v, want context.Canceled", name, err)
+			}
+			other := "Grant"
+			if name == other {
+				other = "Consent"
+			}
+			own, others := 0, 0
+			s.AfterCall(name, func() { own++ })
+			s.AfterCall(other, func() { others++ })
+			_ = call(s, name)
+			if own != 1 || others != 0 {
+				t.Errorf("AfterCall: %s ran its own hook %d times and %s's %d times, want 1 and 0", name, own, other, others)
+			}
+		})
 	}
+}
+
+// Under SQLContext the store keeps every contract of store.Store, the one for an ended context
+// included (storetest): the broker tests that use it see what a SQL store would do.
+func TestUnderSQLContextTheStoreKeepsEveryStoreContract(t *testing.T) {
+	storetest.Run(t, func(*testing.T) store.Store {
+		s := New()
+		s.SQLContext()
+		return s
+	})
 }

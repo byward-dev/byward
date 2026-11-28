@@ -10,24 +10,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/sqlite"
+	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 	"github.com/byward-dev/byward/internal/token"
 )
 
-// On the wired SQLite store, a revocation a client asks for at /revoke still ends its grant when
-// the request ends once its form is read, as its client going away or the proxy's shutdown: the
-// grant is gone from the store, so every replica refuses it and its refresh tokens stop (#693).
+// On the wired SQLite store, a revocation a client asks for at /revoke still ends its grant when its
+// request has ended, as its client going away or the proxy's shutdown, and the client's lookup
+// needs no store (a static client): the grant is gone from the store, so every replica refuses it
+// and its refresh tokens stop (#693).
 // SQLite takes no connection for an ended context, so a revocation left on the request's context
 // would fail and leave the grant live.
 func TestARevocationOnARequestThatEndedStillEndsTheGrantInTheSQLiteStore(t *testing.T) {
-	endings := map[string]func() (context.Context, func()){
-		"client gone": func() (context.Context, func()) { return context.WithCancel(context.Background()) },
-		"shutdown":    func() (context.Context, func()) { return shutdown.WithCancel(context.Background()) },
-	}
-	for name, start := range endings {
-		t.Run(name, func(t *testing.T) {
+	for _, ending := range lifecycle.ContextEndings {
+		t.Run(ending.Ending.String(), func(t *testing.T) {
 			_, cfg := storeEnv(t)
 			now := time.Now()
 			rt, hash := token.NewRefreshToken()
@@ -46,7 +43,7 @@ func TestARevocationOnARequestThatEndedStillEndsTheGrantInTheSQLiteStore(t *test
 			}
 			mux := http.NewServeMux()
 			a.register(mux)
-			ctx, end := start()
+			ctx, end := ending.Start(context.Background())
 			end()
 			r := httptest.NewRequest(http.MethodPost, "https://mcp.example.com/revoke",
 				strings.NewReader(url.Values{"token": {rt}, "client_id": {"test-app"}}.Encode()))

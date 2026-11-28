@@ -180,9 +180,11 @@ bounds, but there are no settings for that yet.
 - `/revoke` revokes the whole grant, whichever of its tokens was sent. A store failure gets 503,
   never a false 200.
 - A revocation finishes in the store even when its request ends, as its client going away or the
-  proxy's shutdown. That covers one the broker detects (a reused code or refresh token, a wrong
-  binding, a denied or refused client) and one a client asks for at `/revoke`. Its store calls run
-  detached from the request, bounded at 5 s. Before #693, a SQL store failed a revocation left on
+  proxy's shutdown. That covers one the broker detects before it rotates a refresh token (a reused
+  code, a refresh token reused past the grace, a wrong binding, a denied or refused client), and one
+  a client asks for at `/revoke` once the client is found. Its store calls run detached from the
+  request, bounded at 5 s; two such calls in a row stay inside the shutdown grace. Two cases are
+  left: see Known gaps. Before #693, a SQL store failed a revocation left on
   an ended request: the grant stayed live on every replica and its refresh tokens kept working,
   and only this replica's deny list stopped its access tokens.
 - The operator commands `byward revoke-user <user key>` and `byward revoke-all --yes` delete the
@@ -314,6 +316,7 @@ returns to a denied host: every sign-in stage refuses it, whichever of its redir
 | A secret with no documented prefix, pasted into a setting that is not secret, is shown | Config refuses, before anything prints it, a value that would show a secret in any setting that is not secret: a token by a prefix its vendor documents (GitHub, Slack), a connection string with a password, or a JWT, named by the setting and the kind only (`internal/config/secretkind.go` reading the catalogue in `internal/logging/secretkind.go`, #495, #657). A secret with no documented prefix passes wherever its characters are allowed: an Entra client secret, about 40 letters, digits and `~._-`, is a valid app role value (`BYWARD_APP_ROLES`, `BYWARD_GATE_ROLES` with Entra), and any such value is a valid role or group name with another IdP, a claim name, a scope, a header name (`BYWARD_UPSTREAM_STRIP_HEADERS` and the header settings), a host in a host list, the OIDC client ID or key ID, or display wording (`BYWARD_OPERATOR_NAME`, `BYWARD_RESOURCE_NAME`, `BYWARD_SCOPE_DESCRIPTION`, `BYWARD_OIDC_NAME`). Such a value is accepted and appears in `--print-config` and the startup log. A list setting is read entry by entry, and a connection string whose password a comma splits across two entries is refused too, except when the part before the comma is all digits, which reads as a port: such a value, pasted into a list such as `BYWARD_GATE_ROLES`, is shown. | #495 |
 | stdio upstream processes share byward's uid | One user's process can read another user's files and environment, and on a `ptrace_scope` 0 host their memory. byward offers no per-user uid or sandbox for them; the operator isolates by host settings and separate containers or VMs. | #182 |
 | Nothing bounds how long a stdio upstream takes to answer | A request to a stdio process waits for its answer for as long as the process holds it, in either protocol era; what ends the wait today is the MCP client leaving or the proxy shutting down. The relay has a header timeout; the stdio bridge has none. | No issue (`internal/upstream/stdio`; #672 lifecycle matrix) |
+| Two revocations still run on the request's context | A refresh token reused within the grace that is not the latest one is revoked by the store inside the rotation, which stays on the request's context so that a failed rotation keeps the old token valid. And `/revoke` looks up a DCR client in the store before its revocation runs detached. A request that ends there leaves the grant live in the store until the next presentation of its token past the grace (the first), or answers 503 so the client can retry (the second). | #693 part 2 |
 | A legacy request whose MCP client left logs its late answer at WARN | The upstream is not told of the cancellation in the legacy era, so its answer arrives with no request waiting, and is logged "upstream response for no waiting request". It is noise, not a failure. | No issue (`internal/upstream/stdio/bridge.go`; #672 lifecycle matrix) |
 
 ## Dependencies and supply chain

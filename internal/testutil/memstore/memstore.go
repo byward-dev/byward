@@ -72,8 +72,9 @@ func (s *Store) SQLContext() {
 	s.sqlContext = true
 }
 
-// AfterCall runs f each time the named method returns, before its caller sees the result: a test
-// ends a request there, between the call that detects a misuse and the revocation that follows.
+// AfterCall runs f each time the named method returns from the store, before its caller sees the
+// result (not when Fail or Down fails it first): a test ends a request there, between the call that
+// detects a misuse and the revocation that follows.
 // A name that is not a store.Store method panics.
 func (s *Store) AfterCall(name string, f func()) {
 	if !methods[name] {
@@ -188,11 +189,7 @@ func (s *Store) UpdateGrant(ctx context.Context, id string, expiresAt time.Time)
 	return s.Store.UpdateGrant(s.inner(ctx), id, expiresAt)
 }
 
-// SetIdPTokens also fails on a cancelled context, as the SQL store does.
 func (s *Store) SetIdPTokens(ctx context.Context, id string, sealed []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	if err := s.err("SetIdPTokens"); err != nil {
 		return err
 	}

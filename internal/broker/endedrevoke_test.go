@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"net/url"
 	"strings"
 	"testing"
@@ -35,8 +36,9 @@ func TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore(t *testi
 		}
 		return e.signIn(t, q).Query().Get("code")
 	}
-	// deniedDCR registers a DCR client returning to bad.example, signs it in, and returns its ID, its
-	// code, and the call that puts bad.example on the operator's denylist.
+	// deniedDCR registers a DCR client returning to bad.example and signs it in, stopping at its code
+	// (dcrSignInTo redeems it), and returns its ID, its code, and the call that puts bad.example on
+	// the operator's denylist.
 	deniedDCR := func(t *testing.T, e *env) (id, code string, deny func()) {
 		id = registerDCR(t, e, badCB)
 		code = offlineCode(t, e, url.Values{"client_id": {id}, "redirect_uri": {badCB}})
@@ -61,21 +63,17 @@ func TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore(t *testi
 			prepare: func(t *testing.T, e *env) (string, url.Values) {
 				return "/token", redeemForm(offlineCode(t, e, nil), url.Values{"code_verifier": {strings.Repeat("x", len(verifier))}})
 			}},
-		"a code of a client denied since": {opts: []func(*Config){withDCR(nil)}, reason: reasonClientDenied, after: "ConsumeCode",
+		"a code of a client denied since it signed in": {opts: []func(*Config){withDCR(nil)}, reason: reasonClientDenied, after: "ConsumeCode",
 			prepare: func(t *testing.T, e *env) (string, url.Values) {
 				id, code, deny := deniedDCR(t, e)
 				deny()
 				return "/token", redeemForm(code, url.Values{"client_id": {id}, "redirect_uri": {badCB}})
 			}},
-		"a refresh by a client denied since": {opts: []func(*Config){withDCR(nil)}, reason: reasonClientDenied, after: "RefreshToken",
+		"a refresh by a client denied since it signed in": {opts: []func(*Config){withDCR(nil)}, reason: reasonClientDenied, after: "RefreshToken",
 			prepare: func(t *testing.T, e *env) (string, url.Values) {
-				id, code, deny := deniedDCR(t, e)
-				res, body := e.redeem(t, code, url.Values{"client_id": {id}, "redirect_uri": {badCB}})
-				if res.StatusCode != 200 {
-					t.Fatalf("redemption: %d %v", res.StatusCode, body)
-				}
-				deny()
-				return "/token", refreshForm(body["refresh_token"].(string), id)
+				c := dcrSignInTo(t, e, badCB)
+				c.deny(t, "bad.example")
+				return "/token", refreshForm(c.tokens["refresh_token"].(string), c.clientID)
 			}},
 		"a refresh token reused past the grace": {reason: reasonRefreshReused, after: "RefreshToken",
 			prepare: func(t *testing.T, e *env) (string, url.Values) {
@@ -100,6 +98,11 @@ func TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore(t *testi
 				ctx, stop := end.Start(t.Context())
 				t.Cleanup(stop)
 				e.st.AfterCall(tc.after, stop)
+				e.st.AfterCall("RevokeGrant", func() {
+					if ctx.Err() == nil {
+						t.Error("the grant was revoked before the request ended: the cell tests nothing")
+					}
+				})
 				e.serveIn(ctx, formRequest(path, strings.NewReader(form.Encode())))
 				if ctx.Err() == nil {
 					t.Fatalf("the request never ended: %s was not called", tc.after)
@@ -115,5 +118,53 @@ func TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore(t *testi
 				}
 			})
 		}
+	}
+}
+
+// A DCR client whose code redemption ends once its tokens are issued, as its client going away or
+// the proxy's shutdown, still has its registration renewed and marked used: recordUse runs detached,
+// so the client neither lapses nor is collected as never used (ADR-0008 §3, #693). An availability
+// guarantee: a lost renewal makes the client register again.
+func TestADCRClientWhoseRedemptionEndsStillHasItsRegistrationRenewed(t *testing.T) {
+	const cb = "https://app.example/cb"
+	for _, end := range lifecycle.ContextEndings {
+		t.Run(end.Ending.String(), func(t *testing.T) {
+			e := newEnv(t, withDCR(nil))
+			id := registerDCR(t, e, cb)
+			code := e.signIn(t, url.Values{"client_id": {id}, "redirect_uri": {cb}, "scope": {"mcp offline_access"}}).Query().Get("code")
+			e.st.SQLContext()
+			ctx, stop := end.Start(t.Context())
+			t.Cleanup(stop)
+			e.st.AfterCall("Grant", stop) // the grant's identity claims: the last store call before recordUse
+			f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {cb}, "client_id": {id}, "code_verifier": {verifier}}
+			e.serveIn(ctx, formRequest("/token", strings.NewReader(f.Encode())))
+			if ctx.Err() == nil {
+				t.Fatal("the request never ended: Grant was not called")
+			}
+			if c, err := e.st.Store.Client(context.Background(), id); err != nil || c.UsedAt.IsZero() {
+				t.Errorf("the client after a redemption whose request ended: %+v, %v; want it marked used", c, err)
+			}
+		})
+	}
+}
+
+// A detached call outlives its request's end, keeps the request's values (its log reference), and
+// still ends within 5 s, so a stuck store cannot hold a revocation open past the shutdown grace.
+func TestADetachedCallOutlivesItsRequestAndEndsWithinFiveSeconds(t *testing.T) {
+	type key struct{}
+	parent, end := context.WithCancel(context.WithValue(context.Background(), key{}, "ref"))
+	before := time.Now()
+	ctx, cancel := detached(parent)
+	defer cancel()
+	end()
+	if ctx.Err() != nil {
+		t.Fatalf("the detached context ended with its request: %v", ctx.Err())
+	}
+	if ctx.Value(key{}) != "ref" {
+		t.Error("the detached context lost the request's values")
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok || deadline.Before(before.Add(5*time.Second)) || deadline.After(time.Now().Add(5*time.Second)) {
+		t.Errorf("deadline %v (set: %v), want 5 s after the call", deadline, ok)
 	}
 }
