@@ -290,7 +290,8 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					cfg := e.cfg
 					cfg.IdP = &failOnceIdP{IdP: cfg.IdP, err: tc.err}
 					e.start(t, cfg)
-					lm, am, before := len(e.logs.String()), len(e.audit.String()), len(counted.list())
+					lm, am := e.marks()
+					before := len(counted.list())
 					r := httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+authorizeQuery(silent(nil)).Encode(), nil)
 					r.AddCookie(h)
 					w := e.serveIn(endedCtx(end), r)
