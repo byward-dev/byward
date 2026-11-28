@@ -9,11 +9,12 @@ import (
 
 // Every list setting refuses a value that names no entry, such as ",": it would read as unset, and a
 // gate list would silently open the gate (parseEntries). OBO scopes, split at white space, take " "
-// as theirs.
+// as theirs. The table has a row for every list setting in the registry (Setting.IsList), so a new
+// one fails here until it has a row (#658).
 func TestEveryListSettingRefusesAListOfNone(t *testing.T) {
 	loadOIDCWith := func(t *testing.T, kv ...string) error { _, err := loadOIDC(t, with(kv...)); return err }
 	loadWith := func(t *testing.T, kv ...string) error { _, err := load(t, nil, kv...); return err }
-	for _, tc := range []struct {
+	rows := []struct {
 		env    string
 		blanks []string // "," and " , " when nil
 		extra  []string
@@ -37,7 +38,23 @@ func TestEveryListSettingRefusesAListOfNone(t *testing.T) {
 		{env: "BYWARD_APP_CLIENT_IDS", extra: []string{"BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"}},
 		{env: "BYWARD_OBO_SCOPES", blanks: []string{" ", "\t"}},
 		{env: "BYWARD_OIDC_SCOPES", load: loadOIDCWith},
-	} {
+	}
+	// Not a list setting, yet refuses a list of none: its scopes are split at white space, not
+	// commas, so it is shown as given (asGivenShape) and is not Setting.IsList.
+	notLists := map[string]bool{"BYWARD_OBO_SCOPES": true}
+	hasRow := map[string]bool{}
+	for _, tc := range rows {
+		hasRow[tc.env] = true
+	}
+	for _, s := range registry {
+		switch {
+		case s.IsList() && !hasRow[s.Env()]:
+			t.Errorf("%s is a list setting with no row here: add one", s.Env())
+		case !s.IsList() && hasRow[s.Env()] && !notLists[s.Env()]:
+			t.Errorf("%s has a row here but is not a list setting", s.Env())
+		}
+	}
+	for _, tc := range rows {
 		blanks, load := tc.blanks, tc.load
 		if blanks == nil {
 			blanks = []string{",", " , "}

@@ -172,7 +172,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 	c.OIDCClientSecret, c.OIDCClientKey = parseText(v.value("oidc-client-secret")), parseText(v.value("oidc-client-key"))
 	c.OIDCClientKeyID = parseText(v.value("oidc-client-key-id"))
 	var scopeErrs []error
-	c.OIDCScopes, scopeErrs = parseOIDCScopes(v.value("oidc-scopes"))
+	c.OIDCScopes, scopeErrs = parseChecked(v.value("oidc-scopes"), oidcScopeEntries)
 	errs = append(errs, scopeErrs...)
 	var err error
 	if c.OIDCSubjectClaim, err = parseClaimName(v.value("oidc-subject-claim"), "sub"); err != nil {
@@ -315,18 +315,11 @@ func parseIssuer(val Value) (string, error) {
 	return raw, nil
 }
 
-// parseOIDCScopes reads BYWARD_OIDC_SCOPES: comma-separated scopes, none with a space, a backslash or
-// a double quote. A refused scope is never shown (ADR-0031 §1).
-func parseOIDCScopes(val Value) ([]string, []error) {
-	list, at, err := parseEntries(val)
-	if err != nil {
-		return nil, []error{err}
+// oidcScopeEntries is BYWARD_OIDC_SCOPES's entries: scopes, none with a space, a backslash or a double
+// quote. A refused scope is never shown (ADR-0031 §1).
+var oidcScopeEntries = entryCheck{"a scope such as openid or email", func(s string) string {
+	if !isScopeToken(s) {
+		return scopeCharsReason
 	}
-	var errs []error
-	for i, sc := range list {
-		if !isScopeToken(sc) {
-			errs = append(errs, refusedForm(val, at(i), sc, "a scope such as openid or email", scopeCharsReason))
-		}
-	}
-	return list, errs
-}
+	return ""
+}}

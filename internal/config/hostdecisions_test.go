@@ -65,11 +65,11 @@ func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
 		setting("allowed-hosts", "", hosts, list(parseAllowedHosts)),
 		setting("cimd-trusted-hosts", "", hosts, list(parseCIMDHosts)),
 		setting("cimd-allowed-hosts", "", hosts, list(parseCIMDHosts)),
-		setting("client-denylist", "client-denylist host", hosts, list(parseClientDenylist)),
+		setting("client-denylist", "client-denylist host", hosts, list(func(v Value) ([]string, []error) { return parseChecked(v, denylistEntries) })),
 		// Config refuses only a client ID that can carry a credential, or a zone; registration's
 		// "denylist entry" column judges the rest of the URL. So this column judges every client ID
 		// that holds what a credential or a zone is written with, whatever its family.
-		setting("client-denylist", "client-denylist client ID", credentialOrZone(hostfamilies.URLProbes("/client.json", "https")), list(parseClientDenylist)),
+		setting("client-denylist", "client-denylist client ID", credentialOrZone(hostfamilies.URLProbes("/client.json", "https")), list(func(v Value) ([]string, []error) { return parseChecked(v, denylistEntries) })),
 		setting("listen", "", hosts, listen("host:port such as 127.0.0.1:8080")),
 		setting("internal-listen", "", hosts, listen("host:port such as 127.0.0.1:9090, or empty")),
 		noAuth("public-url", both),

@@ -17,7 +17,7 @@ func (c *Config) clientSources(v *Values) []error {
 		errs = append(errs, err)
 	}
 	var denyErrs []error
-	c.ClientDenylist, denyErrs = parseClientDenylist(v.value("client-denylist"))
+	c.ClientDenylist, denyErrs = parseChecked(v.value("client-denylist"), denylistEntries)
 	errs = append(errs, denyErrs...)
 	// A BYWARD_CIMD that does not parse is neither on nor off: its parse error is its one error, and a
 	// member of its family given is not also refused as having no effect while it is false, as appTokens
@@ -28,18 +28,18 @@ func (c *Config) clientSources(v *Values) []error {
 	}
 	// The CIMD family (EnabledBy "cimd"), each member refused while CIMD is false once set (isSet): a
 	// flag set to nothing too, as every off check refuses one (#596); a variable set to nothing is unset
-	// (#428). A host list is parsed first, so its entries are known: one that holds an entry, or one
-	// given as a flag set to nothing, is refused, while a list of none (",") is refused for its form
-	// alone. A new member is refused with no edit (#658).
+	// (#428). A host list counts once set, whatever its entries, refused ones included, so it does not
+	// depend on what its parser returns (#635); only a list of none (",") does not, as it is refused for
+	// its form alone. A new member is refused with no edit (#658).
 	lists := map[string]*[]string{"cimd-trusted-hosts": &c.CIMDTrustedHosts, "cimd-allowed-hosts": &c.CIMDAllowedHosts}
 	for _, name := range v.familyOf("cimd") {
-		set := v.isSet(name)
-		counts := set
+		counts := v.isSet(name)
 		if dst := lists[name]; dst != nil {
 			var hostErrs []error
 			*dst, hostErrs = parseCIMDHosts(v.value(name))
 			errs = append(errs, hostErrs...)
-			counts = len(*dst) > 0 || set && v.empty(name)
+			_, _, none := parseEntries(v.value(name))
+			counts = counts && none == nil
 		}
 		if counts && !c.CIMD && cimdErr == nil {
 			errs = append(errs, errorf("%s has no effect while %s is false; remove one of them", v.NameAsGiven(name), v.NameAsGiven("cimd")))
@@ -51,21 +51,14 @@ func (c *Config) clientSources(v *Values) []error {
 // wantDenylistEntry is what a BYWARD_CLIENT_DENYLIST entry must be, for its refusals.
 const wantDenylistEntry = "a CIMD client ID (an https URL) or a host name such as app.example"
 
-// parseClientDenylist reads BYWARD_CLIENT_DENYLIST: CIMD client IDs (https URLs) and host names. A
-// refused entry is never shown (ADR-0031 §1).
-func parseClientDenylist(val Value) ([]string, []error) {
-	list, at, err := parseEntries(val)
-	if err != nil {
-		return nil, []error{err}
+// denylistEntries is BYWARD_CLIENT_DENYLIST's entries: CIMD client IDs (https URLs) and host names.
+// A refused entry is never shown (ADR-0031 §1).
+var denylistEntries = entryCheck{wantDenylistEntry, func(e string) string {
+	if reason := denylistReason(e); reason != "" {
+		return "it " + reason
 	}
-	var errs []error
-	for i, e := range list {
-		if reason := denylistReason(e); reason != "" {
-			errs = append(errs, refusedForm(val, at(i), e, wantDenylistEntry, "it "+reason))
-		}
-	}
-	return list, errs
-}
+	return ""
+}}
 
 // RefusedDenylistEntry is the refusal of entry i of BYWARD_CLIENT_DENYLIST, which client
 // registration refused at wiring for reason, a fixed clause (registration.EntryError): by its place and
@@ -103,15 +96,13 @@ func denylistReason(e string) string {
 // parseCIMDHosts reads a CIMD host list (cimd-trusted-hosts, cimd-allowed-hosts): host names, in
 // lower case. A refused entry is never shown (ADR-0031 §1).
 func parseCIMDHosts(val Value) ([]string, []error) {
-	list, at, err := parseEntries(val)
-	if err != nil {
-		return nil, []error{err}
-	}
-	var errs []error
-	for i, h := range list {
+	list, errs := parseChecked(val, entryCheck{"a host name such as claude.ai", func(h string) string {
 		if reason := hostNameReason(h); reason != "" {
-			errs = append(errs, refusedForm(val, at(i), h, "a host name such as claude.ai", "it "+reason))
+			return "it " + reason
 		}
+		return ""
+	}})
+	for i, h := range list {
 		list[i] = strings.ToLower(h)
 	}
 	return list, errs
