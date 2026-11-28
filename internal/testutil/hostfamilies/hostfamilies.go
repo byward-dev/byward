@@ -79,6 +79,13 @@ var hostBases = []struct {
 		"fe80::1%abcdefghijklmnop", "fe80::1%..", "fe80::1%.", "fe80::1%a/b", "fe80::1%a ", "fe80::1%a\tb", "fe80::1%a\u00a0"}}, // zones the listen settings refuse
 	// Characters no host shows: a zero-width space, a soft hyphen, a non-ASCII control.
 	{"invisible", []string{"a\u200bb.example", "a\u00adb.example", "a\u0080b.example", "evil\u00ad.example", "mcp.example.com\u200b"}},
+	// Bytes that are not UTF-8, which an HTTP/2 :authority carries as sent (#695 found the redirect URI
+	// takes them): a stray continuation byte, a trailing 0xff, an overlong ".", a cut-off sequence.
+	{"not UTF-8", []string{"0\xb6\xb6.example", "mcp.example.com\xff", "mcp\xc0\xaeexample.com", "a\xc3.example"}},
+	// Letters strings.ToLower or EqualFold folds onto ASCII where UTS #46 maps them otherwise, or the same:
+	// the Kelvin sign (to k: a listed host's spelling), İ (Go: i; UTS #46: i and U+0307, another host),
+	// and the long s (Go: kept; UTS #46: s, so faſſ.example is fass.example) (#656).
+	{"unicode fold", []string{"xn--bcher-\u212Ava.example", "ev\u0130l.example", "localho\u017Ft", "fa\u017F\u017F.example"}},
 }
 
 // wraps place a host in a host[:port]: bare, in brackets, and the bracket forms no client writes.

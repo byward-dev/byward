@@ -3,7 +3,7 @@
 # which is edited by hand; a denylist's lines there are the inputs it stops. A Go version that reads
 # a URL or an address differently changes these lines: that is a decision change too.
 
-## IdP endpoint: 740 pass, 18768 refused, of 19508
+## IdP endpoint: 836 pass, 20496 refused, of 21332
 by family:
   name                     pass   108  refused  1944
   name edge                pass   248  refused  4768
@@ -15,14 +15,16 @@ by family:
   ipv4-mapped              pass    19  refused   665
   zone                     pass     0  refused  3074
   invisible                pass     0  refused  1140
+  not UTF-8                pass    48  refused   864
+  unicode fold             pass    48  refused   864
   url shape                pass     5  refused    13
 by wrap:
-  bare                     pass   331  refused  2897
-  [h]                      pass    60  refused  3170
-  [h                       pass     7  refused  3221
-  h]                       pass   337  refused  2931
-  [h]]                     pass     0  refused  3268
-  [h]x                     pass     0  refused  3268
+  bare                     pass   379  refused  3153
+  [h]                      pass    60  refused  3474
+  [h                       pass     7  refused  3525
+  h]                       pass   385  refused  3187
+  [h]]                     pass     0  refused  3572
+  [h]x                     pass     0  refused  3572
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -42,35 +44,35 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   117  refused   905
-  :                        pass     2  refused  1024
-  :443                     pass   117  refused   909
-  :80                      pass   117  refused   909
-  :8080                    pass   117  refused   909
-  :9090                    pass   117  refused   909
-  :65535                   pass   117  refused   909
-  :0                       pass     2  refused  1024
-  :65536                   pass     2  refused  1024
-  :123456                  pass     2  refused  1024
-  :080                     pass     2  refused  1024
-  :+80                     pass     2  refused  1024
-  :-1                      pass     2  refused  1024
-  :0x50                    pass     2  refused  1024
-  :8a                      pass     2  refused  1024
-  :８０                      pass     2  refused  1024
-  :80:80                   pass     2  refused  1024
-  :80:443                  pass     2  refused  1024
-  :80]                     pass     9  refused  1017
+  none                     pass   133  refused   985
+  :                        pass     2  refused  1120
+  :443                     pass   133  refused   989
+  :80                      pass   133  refused   989
+  :8080                    pass   133  refused   989
+  :9090                    pass   133  refused   989
+  :65535                   pass   133  refused   989
+  :0                       pass     2  refused  1120
+  :65536                   pass     2  refused  1120
+  :123456                  pass     2  refused  1120
+  :080                     pass     2  refused  1120
+  :+80                     pass     2  refused  1120
+  :-1                      pass     2  refused  1120
+  :0x50                    pass     2  refused  1120
+  :8a                      pass     2  refused  1120
+  :８０                      pass     2  refused  1120
+  :80:80                   pass     2  refused  1120
+  :80:443                  pass     2  refused  1120
+  :80]                     pass     9  refused  1113
   -                        pass     5  refused    13
 refused because:
-   5439  has a port that is not a number
-   3116  has brackets that do not enclose an IPv6 address alone
-   2930  has a "[" in its host without its "]"
-   2664  has text after the "]" of its IPv6 address that is not a ":" and a port
-   1150  has a port that is not a number from 1 to 65535 without a sign or leading zero
+   5919  has a port that is not a number
+   3532  has brackets that do not enclose an IPv6 address alone
+   3218  has a "[" in its host without its "]"
+   2952  has text after the "]" of its IPv6 address that is not a ":" and a port
+   1310  has a port that is not a number from 1 to 65535 without a sign or leading zero
     913  has white space, which a URL cannot hold; write a space in a path as %20
     912  has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    735  must use https
+    831  must use https
     338  has a "%" not followed by two hexadecimal digits
     228  has a control character, which a URL cannot hold
     134  holds a user name or password
@@ -83,7 +85,7 @@ refused because:
       1  has a scheme other than http or https
       1  has no scheme such as https://
 
-## IdP endpoint, --dev: 788 pass, 18720 refused, of 19508
+## IdP endpoint, --dev: 884 pass, 20448 refused, of 21332
 by family:
   name                     pass   120  refused  1932
   name edge                pass   248  refused  4768
@@ -95,14 +97,16 @@ by family:
   ipv4-mapped              pass    31  refused   653
   zone                     pass     0  refused  3074
   invisible                pass     0  refused  1140
+  not UTF-8                pass    48  refused   864
+  unicode fold             pass    48  refused   864
   url shape                pass     5  refused    13
 by wrap:
-  bare                     pass   355  refused  2873
-  [h]                      pass    84  refused  3146
-  [h                       pass     7  refused  3221
-  h]                       pass   337  refused  2931
-  [h]]                     pass     0  refused  3268
-  [h]x                     pass     0  refused  3268
+  bare                     pass   403  refused  3129
+  [h]                      pass    84  refused  3450
+  [h                       pass     7  refused  3525
+  h]                       pass   385  refused  3187
+  [h]]                     pass     0  refused  3572
+  [h]x                     pass     0  refused  3572
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -122,35 +126,35 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   125  refused   897
-  :                        pass     2  refused  1024
-  :443                     pass   125  refused   901
-  :80                      pass   125  refused   901
-  :8080                    pass   125  refused   901
-  :9090                    pass   125  refused   901
-  :65535                   pass   125  refused   901
-  :0                       pass     2  refused  1024
-  :65536                   pass     2  refused  1024
-  :123456                  pass     2  refused  1024
-  :080                     pass     2  refused  1024
-  :+80                     pass     2  refused  1024
-  :-1                      pass     2  refused  1024
-  :0x50                    pass     2  refused  1024
-  :8a                      pass     2  refused  1024
-  :８０                      pass     2  refused  1024
-  :80:80                   pass     2  refused  1024
-  :80:443                  pass     2  refused  1024
-  :80]                     pass     9  refused  1017
+  none                     pass   141  refused   977
+  :                        pass     2  refused  1120
+  :443                     pass   141  refused   981
+  :80                      pass   141  refused   981
+  :8080                    pass   141  refused   981
+  :9090                    pass   141  refused   981
+  :65535                   pass   141  refused   981
+  :0                       pass     2  refused  1120
+  :65536                   pass     2  refused  1120
+  :123456                  pass     2  refused  1120
+  :080                     pass     2  refused  1120
+  :+80                     pass     2  refused  1120
+  :-1                      pass     2  refused  1120
+  :0x50                    pass     2  refused  1120
+  :8a                      pass     2  refused  1120
+  :８０                      pass     2  refused  1120
+  :80:80                   pass     2  refused  1120
+  :80:443                  pass     2  refused  1120
+  :80]                     pass     9  refused  1113
   -                        pass     5  refused    13
 refused because:
-   5439  has a port that is not a number
-   3116  has brackets that do not enclose an IPv6 address alone
-   2930  has a "[" in its host without its "]"
-   2664  has text after the "]" of its IPv6 address that is not a ":" and a port
-   1150  has a port that is not a number from 1 to 65535 without a sign or leading zero
+   5919  has a port that is not a number
+   3532  has brackets that do not enclose an IPv6 address alone
+   3218  has a "[" in its host without its "]"
+   2952  has text after the "]" of its IPv6 address that is not a ":" and a port
+   1310  has a port that is not a number from 1 to 65535 without a sign or leading zero
     913  has white space, which a URL cannot hold; write a space in a path as %20
     912  has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    687  must use https
+    783  must use https
     338  has a "%" not followed by two hexadecimal digits
     228  has a control character, which a URL cannot hold
     134  holds a user name or password
@@ -163,7 +167,7 @@ refused because:
       1  has a scheme other than http or https
       1  has no scheme such as https://
 
-## IdP issuer: 740 pass, 18768 refused, of 19508
+## IdP issuer: 836 pass, 20496 refused, of 21332
 by family:
   name                     pass   108  refused  1944
   name edge                pass   248  refused  4768
@@ -175,14 +179,16 @@ by family:
   ipv4-mapped              pass    19  refused   665
   zone                     pass     0  refused  3074
   invisible                pass     0  refused  1140
+  not UTF-8                pass    48  refused   864
+  unicode fold             pass    48  refused   864
   url shape                pass     5  refused    13
 by wrap:
-  bare                     pass   331  refused  2897
-  [h]                      pass    60  refused  3170
-  [h                       pass     7  refused  3221
-  h]                       pass   337  refused  2931
-  [h]]                     pass     0  refused  3268
-  [h]x                     pass     0  refused  3268
+  bare                     pass   379  refused  3153
+  [h]                      pass    60  refused  3474
+  [h                       pass     7  refused  3525
+  h]                       pass   385  refused  3187
+  [h]]                     pass     0  refused  3572
+  [h]x                     pass     0  refused  3572
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -202,35 +208,35 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   117  refused   905
-  :                        pass     2  refused  1024
-  :443                     pass   117  refused   909
-  :80                      pass   117  refused   909
-  :8080                    pass   117  refused   909
-  :9090                    pass   117  refused   909
-  :65535                   pass   117  refused   909
-  :0                       pass     2  refused  1024
-  :65536                   pass     2  refused  1024
-  :123456                  pass     2  refused  1024
-  :080                     pass     2  refused  1024
-  :+80                     pass     2  refused  1024
-  :-1                      pass     2  refused  1024
-  :0x50                    pass     2  refused  1024
-  :8a                      pass     2  refused  1024
-  :８０                      pass     2  refused  1024
-  :80:80                   pass     2  refused  1024
-  :80:443                  pass     2  refused  1024
-  :80]                     pass     9  refused  1017
+  none                     pass   133  refused   985
+  :                        pass     2  refused  1120
+  :443                     pass   133  refused   989
+  :80                      pass   133  refused   989
+  :8080                    pass   133  refused   989
+  :9090                    pass   133  refused   989
+  :65535                   pass   133  refused   989
+  :0                       pass     2  refused  1120
+  :65536                   pass     2  refused  1120
+  :123456                  pass     2  refused  1120
+  :080                     pass     2  refused  1120
+  :+80                     pass     2  refused  1120
+  :-1                      pass     2  refused  1120
+  :0x50                    pass     2  refused  1120
+  :8a                      pass     2  refused  1120
+  :８０                      pass     2  refused  1120
+  :80:80                   pass     2  refused  1120
+  :80:443                  pass     2  refused  1120
+  :80]                     pass     9  refused  1113
   -                        pass     5  refused    13
 refused because:
-   5439  has a port that is not a number
-   3116  has brackets that do not enclose an IPv6 address alone
-   2930  has a "[" in its host without its "]"
-   2664  has text after the "]" of its IPv6 address that is not a ":" and a port
-   1150  has a port that is not a number from 1 to 65535 without a sign or leading zero
+   5919  has a port that is not a number
+   3532  has brackets that do not enclose an IPv6 address alone
+   3218  has a "[" in its host without its "]"
+   2952  has text after the "]" of its IPv6 address that is not a ":" and a port
+   1310  has a port that is not a number from 1 to 65535 without a sign or leading zero
     913  has white space, which a URL cannot hold; write a space in a path as %20
     912  has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    735  must use https
+    831  must use https
     338  has a "%" not followed by two hexadecimal digits
     228  has a control character, which a URL cannot hold
     134  holds a user name or password
