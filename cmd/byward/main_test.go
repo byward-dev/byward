@@ -328,6 +328,12 @@ func TestRevokeCommandsExit2OnMisuseOrNoStore1OnAStoreFailureAndNameTheRevokedUs
 		stderr string // the whole stderr of a command that is not done; "" for a done one
 	}{
 		{"revoke-user without a key", []string{"revoke-user"}, noStore, exitConfig, "", revokeUserUsage},
+		{"revoke-user --key=", []string{"revoke-user", "--key="}, noStore, exitConfig, "", revokeUserUsage},
+		{"revoke-user --key", []string{"revoke-user", "--key"}, noStore, exitConfig, "", revokeUserUsage},
+		{"revoke-user --yes", []string{"revoke-user", "--yes"}, noStore, exitConfig, "", revokeUserUsage},
+		{"revoke-user -x", []string{"revoke-user", "-x"}, noStore, exitConfig, "", revokeUserUsage},
+		{"revoke-user -- -odd-key", []string{"revoke-user", "--", "-odd-key"}, noStore, exitConfig, "", revokeUserUsage},
+		{"revoke-user --key=-odd-key", []string{"revoke-user", "--key=-odd-key"}, noStore, exitConfig, "", `byward: revoke-user (8 characters, not shown): not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub; a sub is at most 255 printable ASCII characters), as the audit records' user_key shows it` + "\n"},
 		{"revoke-user with two keys", []string{"revoke-user", user, user}, noStore, exitConfig, "", revokeUserUsage},
 		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.example"}, noStore, exitConfig, "", `byward: revoke-user (21 characters, not shown): not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub; a sub is at most 255 printable ASCII characters), as the audit records' user_key shows it` + "\n"},
 		{"revoke-user with an empty key", []string{"revoke-user", ""}, noStore, exitConfig, "", `byward: revoke-user (0 characters, not shown): not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub; a sub is at most 255 printable ASCII characters), as the audit records' user_key shows it` + "\n"},
@@ -342,6 +348,7 @@ func TestRevokeCommandsExit2OnMisuseOrNoStore1OnAStoreFailureAndNameTheRevokedUs
 		{"revoke-user with a store that cannot open", []string{"revoke-user", user}, corruptStore, exitRuntime, "", "byward: revoke-user failed: " + storeCannotOpen},
 		{"revoke-all with a store that cannot open", []string{"revoke-all", "--yes"}, corruptStore, exitRuntime, "", "byward: revoke-all failed: " + storeCannotOpen},
 		{"revoke-user", []string{"revoke-user", strings.ToUpper(user)}, proxysStore, exitOK, "revoked user " + user + " in BYWARD_STORE_DIR" + revoked, ""},
+		{"revoke-user with --key", []string{"revoke-user", "--key=" + strings.ToUpper(user)}, proxysStore, exitOK, "revoked user " + user + " in BYWARD_STORE_DIR" + revoked, ""},
 		{"revoke-all", []string{"revoke-all", "--yes"}, proxysStore, exitOK, "revoked every user in BYWARD_STORE_DIR" + revoked, ""},
 	}
 	for _, tc := range cases {
@@ -455,9 +462,55 @@ func operatorEnv(t *testing.T, st operatorStore) (env []string, stateDir, counte
 	return env, stateDir, counter
 }
 
+func TestRevokeUserHelpPrintsUsageAndExits0(t *testing.T) {
+	for _, flag := range []string{"-h", "--help"} {
+		t.Run(flag, func(t *testing.T) {
+			code, stdout, stderr := runWith([]string{"revoke-user", flag})
+			if code != exitOK || stdout != revokeUserUsage || stderr != "" {
+				t.Fatalf("code %d (want %d)\nstdout %q\nwant   %q\nstderr %q", code, exitOK, stdout, revokeUserUsage, stderr)
+			}
+		})
+	}
+}
+
+func TestRevokeUserTakesAnyKeyAfterKeyEqualsUnderOIDCAndNeverAKeyAfterDashes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		code   int
+		stdout string
+		stderr string
+	}{
+		{"--key=-odd-key", []string{"revoke-user", "--key=-odd-key"}, exitOK, "revoked user -odd-key in BYWARD_STORE_DIR" + revoked, ""},
+		{"--key=", []string{"revoke-user", "--key="}, exitConfig, "", revokeUserUsage},
+		{"-- -odd-key", []string{"revoke-user", "--", "-odd-key"}, exitConfig, "", revokeUserUsage},
+		{"KEY -- cmd args", []string{"revoke-user", "alice", "--", "/bin/true", "arg"}, exitOK, "revoked user alice in BYWARD_STORE_DIR" + revoked, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _, _ := operatorEnv(t, proxysStore)
+			secret := setting(env, "BYWARD_ENTRA_CLIENT_SECRET_FILE")
+			env = append(without(env, "BYWARD_ENTRA_"), "BYWARD_IDP=oidc", "BYWARD_OIDC_ISSUER=https://issuer.example",
+				"BYWARD_OIDC_CLIENT_ID=client", "BYWARD_OIDC_CLIENT_SECRET_FILE="+secret)
+			if slices.Contains(tc.args, "--") {
+				env = append(without(without(env, "BYWARD_UPSTREAM_URL="), "BYWARD_ASSERTION_KEYS_DIR="), "BYWARD_DATA_DIR="+t.TempDir())
+			}
+			code, stdout, stderr := runWith(tc.args, env...)
+			var okStderr bool
+			if tc.code == exitOK {
+				okStderr = strings.Contains(stderr, `"reason":"operator revoke-user"`)
+			} else {
+				okStderr = stderr == tc.stderr
+			}
+			if code != tc.code || stdout != tc.stdout || !okStderr {
+				t.Fatalf("code %d (want %d)\nstdout %q\nwant   %q\nstderr %q\nwant   %q", code, tc.code, stdout, tc.stdout, stderr, tc.stderr)
+			}
+		})
+	}
+}
+
 func TestHelpListsTheOperatorCommands(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--help"})
-	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <user key> [-- stdio-upstream-command [args...]]") || !strings.Contains(stdout, "byward revoke-all --yes [-- stdio-upstream-command [args...]]") ||
+	if code != exitOK || !strings.Contains(stdout, "byward revoke-user (--key=<user key> | <user key>) [-- stdio-upstream-command [args...]]") || !strings.Contains(stdout, "byward revoke-all --yes [-- stdio-upstream-command [args...]]") ||
 		!strings.Contains(stdout, "byward store new-epoch --yes [-- stdio-upstream-command [args...]]") {
 		t.Fatalf("code=%d help=%q", code, stdout)
 	}
@@ -569,7 +622,7 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 
 // The operator commands' refusals, and the line tails several tests share, pinned as literals.
 const (
-	revokeUserUsage       = "byward: usage: byward revoke-user <user key> [-- stdio-upstream-command [args...]]\n"
+	revokeUserUsage       = "byward: usage: byward revoke-user (--key=<user key> | <user key>) [-- stdio-upstream-command [args...]]\n"
 	revokeAllUsage        = "byward: usage: byward revoke-all --yes [-- stdio-upstream-command [args...]] (signs every user out)\n"
 	newEpochUsage         = "byward: usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]] (refresh tokens from before it stop working)\n"
 	newEpochNeedsPostgres = "byward: store new-epoch: new-epoch is for the PostgreSQL store (BYWARD_STORE_POSTGRES_DSN_FILE); the SQLite store finds a restore at startup from BYWARD_STORE_COUNTER_FILE (docs/how-to/state.md)\n"

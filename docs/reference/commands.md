@@ -15,7 +15,7 @@ them.
 | `byward check --offline [-- <command>]` | validates the configuration as the proxy does at startup | none | 0, 2 |
 | `byward doctor [--json] [-- <command>]` | probes the running proxy as MCP clients do, and the IdP app | the public URL and the IdP | 0, 2, 4, 8, 12 |
 | `byward init entra --tenant <id>` | prints the `az` commands for the Entra app registration and a minimal env file | none | 0, 2 |
-| `byward revoke-user <user key> [-- <command>]` | ends one user's access ([below](#byward-revoke-user)) | the store | 0, 1, 2 |
+| `byward revoke-user (--key=<user key> | <user key>) [-- <command>]` | ends one user's access ([below](#byward-revoke-user)) | the store | 0, 1, 2 |
 | `byward revoke-all --yes [-- <command>]` | ends every user's access ([below](#byward-revoke-all)) | the store | 0, 1, 2 |
 | `byward store new-epoch --yes [-- <command>]` | after restoring the PostgreSQL store: starts a new store epoch, so refresh tokens from before it are refused ([below](#byward-store-new-epoch)) | the store | 0, 1, 2 |
 | `byward jwks` | prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file ([below](#byward-jwks)) | none | 0, 2 |
@@ -204,8 +204,10 @@ proxy and run `byward doctor`.
 Which command fits which situation: [revoke access](../how-to/revoke-access.md).
 
 ```sh
-byward revoke-user <user key> [-- <command>]
+byward revoke-user (--key=<user key> | <user key>) [-- <command>]
 ```
+
+Use `--key=<user key>` to pass a key that starts with `-` (it works for any key). `-h` or `--help` prints the usage line and exits 0.
 
 Deletes every grant of one user and records a cut-off, so every proxy using the same store refuses
 the user's refresh tokens at once and their access tokens at its next deny-list sync, within

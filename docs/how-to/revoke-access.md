@@ -28,6 +28,8 @@ working.
 byward revoke-user <user key>
 ```
 
+A key that starts with `-` goes as `--key=<user key>`.
+
 It prints the store it acted on: check that it is the proxy's. A mistyped setting that points at no
 store is refused with exit code 2, and nothing is created.
 

@@ -23,7 +23,7 @@ type command struct {
 
 var commands = map[string]command{
 	"revoke-user": {
-		usage: "byward revoke-user <user key> [-- stdio-upstream-command [args...]]\n      end one user's access: their grants go, and every proxy refuses their tokens within seconds;\n      works while the proxy runs",
+		usage: "byward revoke-user (--key=<user key> | <user key>) [-- stdio-upstream-command [args...]]\n      end one user's access: their grants go, and every proxy refuses their tokens within seconds;\n      works while the proxy runs",
 		run:   revokeUser,
 	},
 	"revoke-all": {
@@ -97,15 +97,28 @@ func operatorLoad(args, environ []string, stderr io.Writer) (*config.Config, boo
 // revokeUser is revoke-user (ADR-0006 §9).
 func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
 	flags, upstream := splitAtDashes(args)
-	if len(flags) != 1 {
-		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-user <user key> [-- stdio-upstream-command [args...]]")
+	const usage = "byward: usage: byward revoke-user (--key=<user key> | <user key>) [-- stdio-upstream-command [args...]]"
+	var key string
+	switch {
+	case len(flags) == 1 && (flags[0] == "-h" || flags[0] == "--help"):
+		_, _ = fmt.Fprintln(stdout, usage)
+		return exitOK
+	case len(flags) == 1 && strings.HasPrefix(flags[0], "--key="):
+		key = strings.TrimPrefix(flags[0], "--key=")
+		if key == "" {
+			_, _ = fmt.Fprintln(stderr, usage)
+			return exitConfig
+		}
+	case len(flags) == 1 && !strings.HasPrefix(flags[0], "-"):
+		key = flags[0]
+	default:
+		_, _ = fmt.Fprintln(stderr, usage)
 		return exitConfig
 	}
 	cfg, ok := operatorLoad(upstream, environ, stderr)
 	if !ok {
 		return exitConfig
 	}
-	key := flags[0]
 	user, where, err := server.RevokeUser(ctx, cfg, logging.New(stderr, cfg.LogFormat), key)
 	switch {
 	case errors.Is(err, server.ErrNotAUserKey):
