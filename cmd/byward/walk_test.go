@@ -102,7 +102,9 @@ var walkNoValue = map[string]string{
 }
 
 // walkGaps names each command with no surface and no entry in noValue, and each of init's flags with
-// no surface, so a new command or flag that can print a value fails the walk by name.
+// no surface, so a new command or flag that can print a value fails the walk by name. It is the rule
+// TestOperatorCommandsShowNoArgumentTheyAreGiven keeps for arguments (its placed and coveredElsewhere),
+// applied to printed values and init's flags; a third caller would extract the two into one.
 func walkGaps(surfaces []walkSurface, cmds map[string]command, noValue map[string]string, initFlags *flag.FlagSet) []string {
 	var gaps []string
 	for name := range cmds {

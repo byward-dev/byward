@@ -73,6 +73,15 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 		"a dot before eyJ, with nothing before the dot":              {value: ".eyJx", logged: ".eyJx"},
 		"a dot before a JWT header (HoldsJWT, which config refuses)": {value: ".eyJx.", logged: redacted},
 		"a payload's eyJ ending the string":                          {value: "a.eyJ", logged: redacted},
+		"a JWT header and payload starting A":                        {value: "eyJA.A.", logged: redacted}, // each end of each range in jwtHeader
+		"a JWT header and payload starting 9":                        {value: "eyJ9.9.", logged: redacted},
+		"a payload's eyJ after Z, ending the string":                 {value: "Z.eyJ", logged: redacted}, // and in jwtPayload
+		"a payload's eyJ after A, ending the string":                 {value: "A.eyJ", logged: redacted},
+		"a payload's eyJ after 0, ending the string":                 {value: "0.eyJ", logged: redacted},
+		"a payload eyJZ ending the string":                           {value: "x.eyJZ", logged: redacted},
+		"a payload eyJA ending the string":                           {value: "x.eyJA", logged: redacted},
+		"a payload eyJa ending the string":                           {value: "x.eyJa", logged: redacted},
+		"a payload eyJ9 ending the string":                           {value: "x.eyJ9", logged: redacted},
 		"a vendor token in a stderr line":                            {value: "auth with " + "ghp_" + strings.Repeat("Q7", 18) + " failed", logged: redacted},
 		"a URL with a password in a stderr line":                     {value: "dial postgres://app:" + "Q7q7Q7" + "@db.example/app: refused", logged: redacted},
 		"a JSON line naming an origin, then an email":                {value: `{"endpoint":"https://api.example.com","user":"bob@example.com"}`, logged: `{"endpoint":"https://api.example.com","user":"bob@example.com"}`},
@@ -378,9 +387,15 @@ func TestHoldsJWTFindsAJWTButNotAnEyJInsideAWord(t *testing.T) {
 		{"x" + "." + "eyJ" + "zdWIiOiJ4In0" + ".sig", true, true}, // a header that does not start eyJ
 		{"heyJude.example", false, true},
 		{"HoneyJar.example", false, true},
-		{"app2eyJet.example", false, true},                      // a digit before eyJ is inside the word
-		{"OKeyJar.example", false, true},                        // so is an upper-case letter
-		{"ann.eyJones", false, true},                            // a dot before eyJ, but no dot after it
+		{"app2eyJet.example", false, true}, // a digit before eyJ is inside the word
+		{"OKeyJar.example", false, true},   // so is an upper-case letter
+		{"ann.eyJones", false, true},       // a dot before eyJ, but no dot after it
+		{"ZeyJx.y", false, true},           // each end of each range of the word's characters before eyJ
+		{"AeyJx.y", false, true},
+		{"zeyJx.y", false, true},
+		{"aeyJx.y", false, true},
+		{"9eyJx.y", false, true},
+		{"0eyJx.y", false, true},
 		{"eyJ" + "hbGciOiJFUzI1NiJ9" + "." + "eyJ", true, true}, // cut short after the header's dot
 		{"Basic tier", false, true},
 		{"dcr-Qm9eyJx_7k-eyJAbCdEfGh", false, false},

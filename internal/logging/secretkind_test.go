@@ -52,6 +52,13 @@ var secretKinds = []struct{ value, class string }{
 	{"100% " + fakeToken("ghp_"), "a GitHub token"},         // a % that is no escape
 	{"ghp_" + strings.Repeat("q7", 18), "a GitHub token"},   // a tail in lower case
 	{"ghp_Q_" + strings.Repeat("Q7", 18), "a GitHub token"}, // an underscore in the tail
+	{"ghp_A" + "Q7Q7Q7Q7Q", "a GitHub token"},               // the tail's first character, at each end of each range
+	{"ghp_Z" + "Q7Q7Q7Q7Q", "a GitHub token"},
+	{"ghp_a" + "Q7Q7Q7Q7Q", "a GitHub token"},
+	{"ghp_z" + "Q7Q7Q7Q7Q", "a GitHub token"},
+	{"ghp_0" + "Q7Q7Q7Q7Q", "a GitHub token"},
+	{"ghp_9" + "Q7Q7Q7Q7Q", "a GitHub token"},
+	{"ghp_Q" + "AZaz09Q7Q", "a GitHub token"}, // and of the rest
 	{token, jwtKind},
 	{"Bearer " + token, jwtKind},   // as an Authorization header's value
 	{"x\n" + token, jwtKind},       // shown quoted, after the escape \n
@@ -75,6 +82,7 @@ func TestSecretKindNamesOnlyTheKindsItLists(t *testing.T) {
 		"/byward-users", "https://app.example/client.json", "postgres://db.example/app", "postgres://app@db.example/app",
 		"user@example.com", "Server=db;Database=app", "a=b", "OldPassword=x", "passwords=many", "00000000-0000-0000-0000-000000000000",
 		"A" + fakeToken("ghp_"), "ghp_\t" + strings.Repeat("Q7", 18), "https://h.example/a:b@c", "https://h.example:8080/pkg@1.0",
+		"Z" + fakeToken("ghp_"), "z" + fakeToken("ghp_"), "9" + fakeToken("ghp_"), "0" + fakeToken("ghp_"), // a word's character before a prefix, at each end of each range
 		"postgres://app:@db.example/app", "a+password=b",
 		"docs at https://docs.example: ask ops@example.com",        // a space ends a URL's password
 		"docs at https://docs.example see ops:on-call@example.com", // and its user name
@@ -119,7 +127,13 @@ func TestSecretKindReadsEveryURLSchemeAndUserPart(t *testing.T) {
 		"x+1://app:" + pw + "@h.example",     // each of RFC 3986's scheme characters
 		"x.1://app:" + pw + "@h.example",
 		"x-1://app:" + pw + "@h.example",
-		"redis://:" + pw + "@cache.example",                 // an empty user name
+		"redis://:" + pw + "@cache.example", // an empty user name
+		"A://app:" + pw + "@h.example",      // a one-letter scheme, at each end of each range
+		"Z://app:" + pw + "@h.example",
+		"a://app:" + pw + "@h.example",
+		"z://app:" + pw + "@h.example",
+		"s0://app:" + pw + "@h.example", // a digit after the scheme's first letter, at each end of the range
+		"s9://app:" + pw + "@h.example",
 		"postgres://app:" + "p\"w" + pw + "@db.example/app", // a " in the password
 	} {
 		if got := secretKind(s); got != passwordKind {
@@ -146,12 +160,18 @@ func TestSplitPasswordFindsOnlyAPasswordACommaSplit(t *testing.T) {
 		want    bool
 	}{
 		{[]string{"postgres://app:Hun", "ter2Q7@db/x"}, true},
-		{[]string{"Postgres://app:Hun", "ter2Q7@db/x"}, true},            // an upper-case scheme
-		{[]string{`"postgres://app:Hun`, `ter2Q7@db/x "`}, true},         // a list shown quoted
-		{[]string{" postgres://app:Hun", "ter2Q7@db/x"}, true},           // a space after the comma
-		{[]string{`"postgres://a\tpp:Hun`, `ter2Q7@db/x"`}, true},        // an escape in the user name
-		{[]string{"postgres://app:Hun", "@db/x"}, true},                  // the comma ends the password
-		{[]string{"postgres://app:Hun", "ter", "x@db/x"}, true},          // two commas in it
+		{[]string{"Postgres://app:Hun", "ter2Q7@db/x"}, true},     // an upper-case scheme
+		{[]string{`"postgres://app:Hun`, `ter2Q7@db/x "`}, true},  // a list shown quoted
+		{[]string{" postgres://app:Hun", "ter2Q7@db/x"}, true},    // a space after the comma
+		{[]string{`"postgres://a\tpp:Hun`, `ter2Q7@db/x"`}, true}, // an escape in the user name
+		{[]string{"postgres://app:Hun", "@db/x"}, true},           // the comma ends the password
+		{[]string{"postgres://app:Hun", "ter", "x@db/x"}, true},   // two commas in it
+		{[]string{"A://app:Hun", "ter2Q7@db/x"}, true},            // a one-letter scheme, at each end of each range
+		{[]string{"Z://app:Hun", "ter2Q7@db/x"}, true},
+		{[]string{"a://app:Hun", "ter2Q7@db/x"}, true},
+		{[]string{"z://app:Hun", "ter2Q7@db/x"}, true},
+		{[]string{"xAZaz09+.-://app:Hun", "ter2Q7@db/x"}, true},          // every scheme character after the first
+		{[]string{"redis://:Hun", "ter2Q7@db/x"}, true},                  // an empty user name
 		{[]string{"https://a.example:9000", "ops@example.com"}, false},   // a port
 		{[]string{"smtp://ops:", "ops@example.com"}, false},              // an empty password
 		{[]string{"smtp://ops:@mail.example", "ops@example.com"}, false}, // a whole URL, empty password
@@ -186,12 +206,24 @@ func TestShownSecretKindReadsAValueAsItIsShown(t *testing.T) {
 	tail := strings.Repeat("Q7", 18)
 	for _, tc := range []struct{ name, shown, want string }{
 		{"quoted after \\t", strconv.Quote("x\t" + tok), "a GitHub token"},
+		{"quoted after \\xf0", strconv.Quote("\xf0" + tok), "a GitHub token"}, // each end of each hex range, in each escape
+		{"quoted after \\xa9", strconv.Quote("\xa9" + tok), "a GitHub token"},
+		{"quoted after \\u009f", strconv.Quote("\u009f" + tok), "a GitHub token"},
+		{"quoted after \\u00ad", strconv.Quote("\u00ad" + tok), "a GitHub token"},
+		{"quoted after \\U000f0000", strconv.Quote("\U000f0000" + tok), "a GitHub token"},
+		{"quoted after \\U000e009a", strconv.Quote("\U000e009a" + tok), "a GitHub token"},
+		{"a \\x escape before a scheme of hex letters", strconv.Quote("\x01db2://app:Q7q7Q7@db/x"), passwordKind}, // an escape takes only its own digits
+		{"a \\u escape before a scheme of hex letters", strconv.Quote("\u00addb2://app:Q7q7Q7@db/x"), passwordKind},
+		{"a \\U escape before a scheme of hex letters", strconv.Quote("\U000e0001db2://app:Q7q7Q7@db/x"), passwordKind},
+		{"a quoted \" in a URL's user name", strconv.Quote("postgres://a\"pp:Q7q7Q7@db/x\t"), passwordKind},
 		{"an escaped backslash before a password key", `"host=db\\password=` + "Q7Q7Q7" + `\t"`, passwordKind},
 		{"a password key starting a value shown quoted", strconv.Quote("password=" + "Q7Q7Q7\t"), passwordKind},
 		{"an escape between a prefix and its tail", strconv.Quote("ghp_\t" + tail), ""},
 		{"an escape in a URL's user name", strconv.Quote("postgres://a\tpp:Q7q7Q7@db/x"), passwordKind},
 		{"percent-escaped in upper case", "https://up.example/ghp%5F" + tail, "a GitHub token"},
 		{"percent-escaped in lower case", "https://up.example/ghp%5f" + tail, "a GitHub token"},
+		{"a percent-escaped tab before a token", "https://up.example/x%09" + tok, "a GitHub token"}, // each end of the ranges
+		{"a percent-escaped line break before a token", "https://up.example/x%0a" + tok, "a GitHub token"},
 		{"percent-escaped twice, undone once", "https://up.example/ghp%255F" + tail, ""},
 		{"percent-escaped beside a % that is no escape", "%67hp_" + tail + ",X-100%", "a GitHub token"},
 		{"percent-escaped after a % that is no escape", "100% %67hp_" + tail, "a GitHub token"},
