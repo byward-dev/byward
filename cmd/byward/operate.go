@@ -190,6 +190,13 @@ func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer
 			return exitConfig
 		}
 	}
+	// The script shows both URLs as written below, so neither may show a secret (#641).
+	for _, c := range []struct{ name, shown string }{{"public-url", u.String()}, {"upstream-url", *f.upstreamURL}} {
+		if err := config.CheckShown(c.name, c.shown); err != nil {
+			_, _ = fmt.Fprintf(stderr, "byward: init: %v (give --%s)\n", err, c.name)
+			return exitConfig
+		}
+	}
 	script, err := server.InitScript(server.InitOptions{IdP: args[0], Tenant: *f.tenant, PublicURL: u, UpstreamURL: *f.upstreamURL,
 		SecretYears: int(secretYears), Credential: *f.credential, Now: time.Now()})
 	if err != nil {

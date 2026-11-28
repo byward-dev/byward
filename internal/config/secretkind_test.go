@@ -70,6 +70,9 @@ var secretKinds = []struct{ value, class string }{
 	{"Bearer " + fakeJWT(), "a JWT"},   // as an Authorization header's value
 	{"x\n" + fakeJWT(), "a JWT"},       // shown quoted, after the escape \n
 	{"Bearer%20" + fakeJWT(), "a JWT"}, // percent-escaped, as a URL's path shows it
+	{"postgres://app:" + "Q7Q7Q7Q7" + "\"@db.example/app", "a connection string with a password"},
+	{`{"m":"host=db\u000b` + `password=Q7Q7Q7"}`, "a connection string with a password"},  // a JSON string read as config shows it (logging.AsGiven)
+	{`{"conn":"Server=db\\` + `Password=s3cret"}`, "a connection string with a password"}, // a JSON string read as written
 }
 
 // kindRefusal is the refusal of a setting, named as given, whose value looks like class: shown by its
@@ -167,28 +170,29 @@ func TestEverySettingThatIsNotSecretRefusesASecretItWouldShow(t *testing.T) {
 // A realistic value of each setting that holds free text, a name or a host still loads: the kinds
 // are narrow enough not to refuse what an operator means.
 func TestARealisticValueOfAFreeTextSettingIsNoSecret(t *testing.T) {
-	for name, value := range map[string]string{
-		"upstream-credential-header": "X-Api-Key",
-		"upstream-strip-headers":     "X-Debug-Token, X-Atlassian-Base-Url",
-		"allowed-hosts":              "mcp.example.com, 127.0.0.1:8080",
-		"scope":                      "mcp",
-		"resource-name":              "Acme MCP (password reset tools)",
-		"operator-name":              "Acme Corp. IT, xoxb-style bots welcome",
-		"scope-description":          "Read dashboards; no passwords are stored",
-		"oidc-client-id":             "byward-proxy",
-		"oidc-client-key-id":         "ghp-key-2026",
-		"oidc-scopes":                "groups, roles",
-		"oidc-subject-claim":         "sub",
-		"oidc-roles-claim":           "https://example.com/roles",
-		"oidc-groups-claim":          "groups",
-		"oidc-name":                  "Acme SSO",
-		"assertion-header":           "X-Byward-Identity",
-		"obo-header":                 "X-Byward-Downstream-Token",
-		"client-denylist":            "bad.example, https://bad.example/client.json",
-		"cimd-trusted-hosts":         "app.example",
-		"cimd-allowed-hosts":         "app.example",
+	for _, tc := range []struct{ name, value string }{
+		{"upstream-credential-header", "X-Api-Key"},
+		{"upstream-strip-headers", "X-Debug-Token, X-Atlassian-Base-Url"},
+		{"allowed-hosts", "mcp.example.com, 127.0.0.1:8080"},
+		{"scope", "mcp"},
+		{"resource-name", "Acme MCP (password reset tools)"},
+		{"operator-name", "Acme Corp. IT, xoxb-style bots welcome"},
+		{"scope-description", "Read dashboards; no passwords are stored"},
+		{"oidc-client-id", "byward-proxy"},
+		{"oidc-client-key-id", "ghp-key-2026"},
+		{"oidc-scopes", "groups, roles"},
+		{"oidc-subject-claim", "sub"},
+		{"oidc-roles-claim", "https://example.com/roles"},
+		{"oidc-groups-claim", "groups"},
+		{"oidc-name", "Acme SSO"},
+		{"assertion-header", "X-Byward-Identity"},
+		{"obo-header", "X-Byward-Downstream-Token"},
+		{"client-denylist", "bad.example, https://bad.example/client.json"},
+		{"cimd-trusted-hosts", "app.example"},
+		{"cimd-allowed-hosts", "app.example"},
+		{"operator-name", `{"endpoint":"https://api.example.com","user":"bob@example.com"}`}, // a JSON line naming an origin, then an email (#657)
 	} {
-		s := lookup(name)
+		s, value := lookup(tc.name), tc.value
 		c := readContextOf(s)
 		if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); err != nil {
 			t.Errorf("%s=%q: %v, want it to load", s.Env(), value, err)
@@ -407,5 +411,19 @@ func TestNoDocumentedExampleLooksLikeASecret(t *testing.T) {
 	}
 	if n < 150 {
 		t.Fatalf("%d documented examples found, want them all (160 today)", n)
+	}
+}
+
+// CheckShown refuses a command's shown text as Load refuses a setting's: the variable, the kind and
+// the length, never the value; text with no kind passes (#641).
+func TestCheckShownRefusesAShownSecretAsLoadDoes(t *testing.T) {
+	shown := "https://up.example/mcp?key=" + fakeToken("ghp_")
+	if err := CheckShown("upstream-url", shown); !isConfigError(err) || err.Error() != kindRefusal("BYWARD_UPSTREAM_URL", shown, "a GitHub token") {
+		t.Errorf("CheckShown = %v\nwant %s", err, kindRefusal("BYWARD_UPSTREAM_URL", shown, "a GitHub token"))
+	}
+	for _, shown := range []string{"https://up.example/mcp?team=ghp-docs", ""} {
+		if err := CheckShown("upstream-url", shown); err != nil {
+			t.Errorf("CheckShown(%q) = %v, want nil", shown, err)
+		}
 	}
 }

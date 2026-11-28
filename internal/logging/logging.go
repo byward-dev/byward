@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -185,13 +186,65 @@ var jwtWord = regexp.MustCompile(`(?:^|[^A-Za-z0-9])` + jwtHeader)
 // is accepted, because a length floor would let a short credential such as Basic YTpi through.
 var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 
-// LooksSecret reports whether s holds something shaped like a credential: a compact JWS or JWE, or an
-// HTTP Bearer or Basic credential. Logs redact such a value, and revoke-user prints such a user key
-// only by its length (#594). It decides how a value is shown, never whether it is accepted: it
-// over-matches by design (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides
-// more, but refuses nothing.
+// LooksSecret reports whether s holds something shaped like a credential: a compact JWS or JWE, an
+// HTTP Bearer or Basic credential, or any kind the catalogue refuses (ShownSecretKind: a vendor
+// token, a connection string with a password), so what config would refuse is hidden in a log line
+// too (#657). Logs redact such a value, and revoke-user prints such a user key only by its length
+// (#594). It decides how a value is shown, never whether it is accepted: it over-matches by design
+// (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides more, but refuses nothing.
 func LooksSecret(s string) bool {
-	return authScheme.MatchString(s) || jwtShape.MatchString(s)
+	if len(s) > lookedAtMax || len(s) > MaxReread && rereads(s) {
+		return true // redacted unread
+	}
+	return authScheme.MatchString(s) || jwtShape.MatchString(s) || catalogueRefuses(s)
+}
+
+// MaxReread is the longest string LooksSecret reads more than once: one config would show quoted, or
+// with a %, \ or , that the catalogue reads again decoded or as a list's entries (rereads). Each
+// reading is another pass of the catalogue, so a longer such string is redacted unread, which only
+// ever hides more: a request's path, which the access log reads unauthenticated, costs at most about
+// 3 times main's worst (#657). It is at least a stdio upstream's MaxStderrLine, so no stderr line is
+// redacted unread for its length (TestNoStderrLineIsRedactedUnreadForItsLength).
+const MaxReread = 8 << 10
+
+// rereads reports whether catalogueRefuses reads s more than once.
+func rereads(s string) bool { return strings.ContainsAny(s, "%\\,") || AsGiven(s) != s }
+
+// lookedAtMax is the longest string LooksSecret reads; a longer one is redacted unread, which only
+// ever hides more, so a request's path or an attribute an unauthenticated client controls is read at
+// most 16 KiB long (#657), and one it would read more than once at most MaxReread. Config's
+// refusal reads every value whole: only the redact grade is capped.
+const lookedAtMax = 16 << 10
+
+// catalogueRefuses reports whether config would refuse s in a setting that is not secret, however
+// that setting shows it: as given or quoted when it is not printable (AsGiven), each whole and as a
+// list's entries, where a password a comma split is found (ShownListSecretKind). A reading equal to
+// one already read is skipped, as most are: logs read every string attribute this way, a request's
+// path among them.
+func catalogueRefuses(s string) bool {
+	readings := []string{s}
+	if quoted := AsGiven(s); quoted != s {
+		readings = append(readings, quoted)
+	}
+	for _, r := range readings {
+		if ShownSecretKind(r) != "" {
+			return true
+		}
+		// A URL list shows each entry trimmed (config's splitList).
+		if entries := strings.Split(r, ","); (len(entries) > 1 || strings.TrimSpace(r) != r) && ShownListSecretKind(trimmed(entries)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// trimmed is entries, each with its surrounding white space removed.
+func trimmed(entries []string) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = strings.TrimSpace(e)
+	}
+	return out
 }
 
 // HoldsJWT reports whether s holds a compact JWS or JWE: a segment starting eyJ at the start of a

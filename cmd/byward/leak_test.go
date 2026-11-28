@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -21,8 +22,9 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/pgtest"
 )
 
-// canary stands for the secret in secretForms, the 14 forms of a secret in the #485 leak matrix (the
-// "14 secret shapes" of ADR-0031 §1). No other value in the test holds it.
+// canary stands for the secret in secretForms: the 14 forms of a secret in the #485 leak matrix (the
+// "14 secret shapes" of ADR-0031 §1), and the kinds of the catalogue of secrets (#657). No other
+// value in the test holds it.
 const canary = "LK7CANARY"
 
 var secretForms = []struct{ name, value string }{
@@ -40,6 +42,17 @@ var secretForms = []struct{ name, value string }{
 	{"no scheme", "//h.example/;tok=LK7CANARY"},
 	{"no slashes", "https:h.example/;tok=LK7CANARY"},
 	{"one slash", "https:/h.example/;tok=LK7CANARY"},
+	// The catalogue's kinds (internal/logging/secretkind.go, #657), each holding the canary; the URL
+	// with a password and the key=value password are the userinfo and DSN forms above.
+	{"GitHub token", "ghp_" + "LK7CANARY" + "Q7Q7Q7"},
+	{"Slack token", "xoxb-" + "LK7CANARY" + "-12345"},
+	{"JWT", "eyJ" + "hbGciOiJSUzI1NiJ9." + "LK7CANARY" + ".c2lnbmF0dXJl"},
+	{"GitHub token after a line break", "x\n" + "ghp_" + "LK7CANARY" + "Q7Q7Q7"},
+	{"GitHub token percent-escaped", "https://h.example/ghp%5F" + "LK7CANARY" + "Q7Q7Q7"},
+	{"opaque Bearer credential", "Bearer " + "LK7CANARY" + "Q7Q7Q7Q7"},                  // redact-only: a Known gap (#657)
+	{"DSN in a JSON line", `{"dsn":"postgres://app:` + "LK7CANARY" + `@db.example/x"}`}, // read by its parts
+	{"password key after a vertical tab", "host=db\v" + "password=LK7CANARY"},
+	{"password key after an escaped backslash in a JSON line", `{"conn":"Server=db\\Password=` + "LK7CANARY" + `"}`}, // found only as the string is written           // found only as it is shown, quoted
 }
 
 // hostForm is a secret in a URL's host, which is a valid host name. A URL setting's shape shows an
@@ -172,7 +185,7 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 	// setting that is not secret refuses at least the form with a password in a URL, as a secret's
 	// kind (#495), so only secrets and the command, whose arguments are never shown, are left.
 	acceptsEveryForm := []string{"entra-client-certificate", "entra-client-secret", "oidc-client-key",
-		"oidc-client-secret", "store-postgres-dsn", "upstream-command", "upstream-credential"}
+		"oidc-client-secret", "store-postgres-dsn", "upstream-command"}
 	for _, s := range settings {
 		switch refuses := refusedTried[s.Name] > 0; {
 		case refuses && slices.Contains(acceptsEveryForm, s.Name):
@@ -267,7 +280,7 @@ func leakContexts(t *testing.T, program string) map[string][]string {
 	httpServe := append(slices.Clone(listen), "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp") // an IP, so startup resolves no name
 	entra := append(authEnv(t), httpServe...)
 	command, _ := json.Marshal([]string{program}) // strings always marshal
-	oidcBase := append(oidcAuthEnv(t), httpServe...)
+	oidcBase := append(oidcAuthEnv(authEnv(t)), httpServe...)
 	oidc := append(slices.Clone(oidcBase), "BYWARD_IDP=oidc", "BYWARD_OIDC_ISSUER=https://idp.example", "BYWARD_OIDC_CLIENT_ID=abc",
 		"BYWARD_GATE_ALLOW_EMPTY=true")
 	dir := t.TempDir()
@@ -344,11 +357,9 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 		"credential":   {"the credential must be secret or certificate; got another value (", false},
 	}
 	fs, _ := newInitFlags(nil)
-	fs.VisitAll(func(f *flag.Flag) {
-		if _, ok := flagRefusals[f.Name]; !ok {
-			t.Errorf("init's flag --%s has no cell here", f.Name)
-		}
-	})
+	for _, name := range withoutCell(flagNames(fs), func(n string) bool { _, ok := flagRefusals[n]; return ok }) {
+		t.Errorf("init's flag --%s has no cell here", name)
+	}
 	type cell struct {
 		place, want string
 		exact       bool // want is all of stderr
@@ -400,12 +411,42 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 	}
 }
 
+// byward init refuses a URL whose text, as the script would print it, holds a secret's kind, as config
+// refuses one in a setting that is not secret: naming the flag or variable and the kind, never the
+// value (#641). The script prints --upstream-url whole, so a token in its query is refused too.
+func TestInitRefusesAURLItWouldPrintWithASecretInIt(t *testing.T) {
+	ghp := "ghp_" + strings.Repeat("Q7", 18)
+	jwt := "eyJ" + "hbGciOiJFUzI1NiJ9" + "." + "eyJ" + "zdWIiOiJ4In0" + "." + "sig"
+	for _, tc := range []struct {
+		name, variable, kind string
+		args, env            []string
+	}{
+		{"--public-url, a token in its path", "BYWARD_PUBLIC_URL", "a GitHub token", []string{"--public-url", "https://m.example/" + ghp + "/mcp"}, nil},
+		{"--upstream-url, a token in its query", "BYWARD_UPSTREAM_URL", "a GitHub token", []string{"--public-url", "https://m.example/mcp", "--upstream-url", "https://up.example/mcp?key=" + ghp}, nil},
+		{"--upstream-url, a JWT in its path", "BYWARD_UPSTREAM_URL", "a JWT", []string{"--public-url", "https://m.example/mcp", "--upstream-url", "https://up.example/" + jwt}, nil},
+		{"BYWARD_UPSTREAM_URL, a token in its query", "BYWARD_UPSTREAM_URL", "a GitHub token", []string{"--public-url", "https://m.example/mcp"}, []string{"BYWARD_UPSTREAM_URL=https://up.example/mcp?key=" + ghp}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runWith(append([]string{"init", "entra", "--tenant", tenant}, tc.args...), tc.env...)
+			flag := "--" + strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(tc.variable, "BYWARD_"), "_", "-"))
+			if code != exitConfig || stdout != "" || !strings.HasPrefix(stderr, "byward: init: "+tc.variable+": ") || !strings.HasSuffix(stderr, "it looks like "+tc.kind+" (give "+flag+")\n") {
+				t.Errorf("exit %d, stdout %q, stderr %q; want exit %d refusing %s as %s", code, stdout, stderr, exitConfig, tc.variable, tc.kind)
+			}
+			if strings.Contains(stderr, "Q7Q7") || strings.Contains(stderr, "zdWIi") {
+				t.Errorf("stderr %q shows the value given", stderr)
+			}
+		})
+	}
+	if code, stdout, _ := runWith([]string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--upstream-url", "https://up.example/mcp?team=ghp-docs"}); code != exitOK || !strings.Contains(stdout, "team=ghp-docs") {
+		t.Errorf("exit %d; want a URL with no secret's kind printed in the script", code)
+	}
+}
+
 // revoke-user shows no key it was given: under Entra, a token pasted where the user key belongs is
 // refused (it is no tid:oid), and named by its length, as init names a value it refuses (#594, ADR-0031 §1). Every form of a secret,
 // and a token's three segments, is given as the key; each must reach the refusal and show nothing.
 func TestRevokeUserShowsNoKeyItWasGiven(t *testing.T) {
-	keys := append(slices.Clone(secretForms), struct{ name, value string }{"JWT", "eyJhbGciOiJSUzI1NiJ9." + canary + ".c2lnbmF0dXJl"})
-	for _, key := range keys {
+	for _, key := range secretForms { // the JWT among them
 		t.Run(key.name, func(t *testing.T) {
 			code, stdout, stderr := runWith([]string{"revoke-user", key.value}, append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)...)
 			want := "byward: revoke-user " + logging.NotShown(key.value) + ": " + server.ErrNotAUserKey.Error() + "\n"
@@ -477,8 +518,7 @@ func TestOperatorCommandsShowNoArgumentTheyAreGiven(t *testing.T) {
 	coveredElsewhere := map[string]string{"init": "TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints"}
 	processStderr := redirectStderr(t)
 	entraEnv, _, _ := operatorEnv(t, noStore)
-	oidcEnv := append(without(entraEnv, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(entraEnv, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
-		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
+	oidcEnv := keycloakOperatorEnv(entraEnv)
 	refused := func(v string) string {
 		// The length is counted here, not by logging.NotShown, so a NotShown that showed part of v fails.
 		return fmt.Sprintf("byward: revoke-user (%d characters, not shown): %s\n", utf8.RuneCountInString(v), server.ErrNotAUserKey)
@@ -525,8 +565,12 @@ func TestOperatorCommandsShowNoArgumentTheyAreGiven(t *testing.T) {
 	}
 	for _, form := range append(slices.Clone(secretForms), hostForm) {
 		v := form.value
+		oidcWant := storeMissingLine
+		if strings.ContainsFunc(v, func(r rune) bool { return r < ' ' || r > '~' }) {
+			oidcWant = refused(v) // a sub is printable ASCII
+		}
 		run(t, form.name, append(usageCells(v),
-			cell{"revoke-user, oidc", storeMissingLine, []string{"revoke-user", v}, oidcEnv}))
+			cell{"revoke-user, oidc", oidcWant, []string{"revoke-user", v}, oidcEnv}))
 	}
 	for _, form := range tokenForms {
 		v := form.value
@@ -538,9 +582,29 @@ func TestOperatorCommandsShowNoArgumentTheyAreGiven(t *testing.T) {
 			cell{"revoke-user, entra", refused(v), []string{"revoke-user", v}, entraEnv},
 			cell{"revoke-user, oidc", oidcWant, []string{"revoke-user", v}, oidcEnv}))
 	}
-	for name := range commands {
-		if !placed[name] && coveredElsewhere[name] == "" {
-			t.Errorf("operator command %q has no cell here: add one, or name the test that covers it", name)
+	for _, name := range withoutCell(slices.Collect(maps.Keys(commands)), func(n string) bool { return placed[n] || coveredElsewhere[n] != "" }) {
+		t.Errorf("operator command %q has no cell here: add one, or name the test that covers it", name)
+	}
+}
+
+// withoutCell lists, sorted, each of names that hasCell says has no test cell: the one rule that
+// every command and every flag of init that can be given a value has one, kept by
+// TestOperatorCommandsShowNoArgumentTheyAreGiven, TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints
+// and the walk (walkGaps).
+func withoutCell(names []string, hasCell func(string) bool) []string {
+	var out []string
+	for _, n := range names {
+		if !hasCell(n) {
+			out = append(out, n)
 		}
 	}
+	slices.Sort(out)
+	return out
+}
+
+// flagNames are the names of fs's flags.
+func flagNames(fs *flag.FlagSet) []string {
+	var names []string
+	fs.VisitAll(func(f *flag.Flag) { names = append(names, f.Name) })
+	return names
 }

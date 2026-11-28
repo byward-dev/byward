@@ -1,7 +1,10 @@
 package logging
 
 import (
+	"encoding/json"
+	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -34,19 +37,16 @@ var tokenPrefixes = []struct{ prefix, class string }{
 // example, a legacy user token, has 18), so prose naming a prefix, bare or as in "xoxb-style", is none.
 const prefixAt = `(?:^|[^A-Za-z0-9_.-])`
 
-var tokenPatterns = func() []struct {
-	re    *regexp.Regexp
-	class string
-} {
-	out := make([]struct {
-		re    *regexp.Regexp
-		class string
-	}, len(tokenPrefixes))
+// tokenPattern is every documented prefix at once, each then followed by its tail, so a value is
+// read once for them all; tokenClass names the kind each prefix is.
+var tokenPattern, tokenClass = func() (*regexp.Regexp, map[string]string) {
+	prefixes := make([]string, len(tokenPrefixes))
+	class := make(map[string]string, len(tokenPrefixes))
 	for i, p := range tokenPrefixes {
-		out[i].re = regexp.MustCompile(prefixAt + regexp.QuoteMeta(p.prefix) + `[A-Za-z0-9][A-Za-z0-9_-]{9}`)
-		out[i].class = p.class
+		prefixes[i] = regexp.QuoteMeta(p.prefix)
+		class[p.prefix] = p.class
 	}
-	return out
+	return regexp.MustCompile(prefixAt + `(` + strings.Join(prefixes, "|") + `)[A-Za-z0-9][A-Za-z0-9_-]{9}`), class
 }()
 
 // urlPassword is a URL with a password in its user part, such as postgres://user:pass@host/db. An
@@ -70,10 +70,8 @@ const jwtKind = "a JWT"
 // secretKind names the kind of secret s holds, or is "" when it holds none: a token by a vendor's
 // documented prefix, a connection string with a password, or a JWT.
 func secretKind(s string) string {
-	for _, p := range tokenPatterns {
-		if p.re.MatchString(s) {
-			return p.class
-		}
+	if m := tokenPattern.FindStringSubmatch(s); m != nil {
+		return tokenClass[m[1]]
 	}
 	if urlPassword.MatchString(s) || keyValuePassword.MatchString(s) {
 		return passwordKind
@@ -99,17 +97,29 @@ var percentEscape = regexp.MustCompile(`%[0-9A-Fa-f]{2}`)
 // that part, user name or password, where a space would end it; each reading is checked as it is
 // and with each percent-escape undone, an escaped space or control character to the reading's own
 // character, as a Go escape is.
+//
+// A JSON document, an object or array and nothing else, is read by its parts instead (jsonKind): a
+// log line an upstream writes as JSON names an origin and, later, an email, which read as one text
+// look like a URL with a password.
 func ShownSecretKind(shown string) string {
+	if kind, ok := jsonKind(shown); ok {
+		return kind
+	}
+	read := []string{}
 	for _, escape := range []string{" ", "\x00"} {
-		read := goEscape.ReplaceAllString(shown, escape)
-		decoded := percentEscape.ReplaceAllStringFunc(read, func(e string) string {
+		escaped := goEscape.ReplaceAllString(shown, escape)
+		decoded := percentEscape.ReplaceAllStringFunc(escaped, func(e string) string {
 			b, _ := strconv.ParseUint(e[1:], 16, 8)
 			if b <= ' ' || b == 0x7f {
 				return escape
 			}
 			return string([]byte{byte(b)})
 		})
-		for _, r := range []string{read, decoded} {
+		for _, r := range []string{escaped, decoded} {
+			if slices.Contains(read, r) {
+				continue // a reading equal to one already read, as each is for a value with no escape
+			}
+			read = append(read, r)
 			if k := secretKind(r); k != "" {
 				return k
 			}
@@ -127,15 +137,19 @@ var splitURLEntry = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*:([^/
 // a Y that is neither empty nor a port (all digits), and a later entry with an @ before any /. A
 // password of digits only, split by a comma, is not found (docs/security-posture.md).
 func splitPassword(entries []string) bool {
+	// atLater[i] is whether an entry after i has an @ before any /, so the list is read in linear time.
+	atLater := make([]bool, len(entries)+1)
+	for i := len(entries) - 1; i >= 0; i-- {
+		at := strings.IndexByte(entries[i], '@')
+		atLater[i] = atLater[i+1] || at >= 0 && !strings.Contains(entries[i][:at], "/")
+	}
 	for i, e := range entries {
-		m := splitURLEntry.FindStringSubmatch(strings.Trim(strings.TrimSpace(goEscape.ReplaceAllString(e, "\x00")), `"`))
-		if m == nil || strings.Trim(m[1], "0123456789") == "" {
-			continue
+		if !atLater[i+1] {
+			return false
 		}
-		for _, later := range entries[i+1:] {
-			if at := strings.IndexByte(later, '@'); at >= 0 && !strings.Contains(later[:at], "/") {
-				return true
-			}
+		m := splitURLEntry.FindStringSubmatch(strings.Trim(strings.TrimSpace(goEscape.ReplaceAllString(e, "\x00")), `"`))
+		if m != nil && strings.Trim(m[1], "0123456789") != "" {
+			return true
 		}
 	}
 	return false
@@ -154,4 +168,50 @@ func ShownListSecretKind(entries []string) string {
 		return passwordKind
 	}
 	return ""
+}
+
+// isJSONDocument reports whether doc, trimmed, is a JSON object or array and nothing else.
+func isJSONDocument(doc string) bool {
+	return doc != "" && (doc[0] == '{' || doc[0] == '[') && json.Valid([]byte(doc))
+}
+
+// jsonKind reads shown, when it is a JSON document (an object or an array, nothing before or after
+// it but white space), by its parts: every key and every string, in the order the document holds
+// them, duplicate keys included, each as it would be shown on its own (AsGiven), read as a list's
+// entries are (ShownListSecretKind), so a string that is itself a JSON document is read by its parts
+// too, and a password split across two strings is found as one a comma split. Each string is also
+// read as written, with its JSON escapes, as text outside JSON is read. Numbers, booleans
+// and null hold no secret. JSON's own escapes (\" and \uXXXX) are undone by decoding. ok is false
+// for anything else, a line with text before its JSON or one cut short included, which is read as
+// text, as before: that reading can only find more (#657).
+func jsonKind(shown string) (kind string, ok bool) {
+	doc := strings.TrimSpace(shown)
+	if !isJSONDocument(doc) {
+		return "", false
+	}
+	dec := json.NewDecoder(strings.NewReader(doc))
+	dec.UseNumber() // a number is a token, never an error, however large
+	var parts []string
+	for read := int64(0); ; read = dec.InputOffset() {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", false
+		}
+		if s, isString := tok.(string); isString {
+			// The string as written too, its escapes undecoded, as a text reading reads them: an
+			// escape inside a URL's user part is a character of it, and one before a password key a
+			// break, as for a value outside JSON. It is read alone, so no match spans two strings;
+			// a string that is itself a JSON document is read by its parts only.
+			if !isJSONDocument(strings.TrimSpace(s)) { // asked, not read: reading it here too would double each level's work
+				if kind := ShownSecretKind(doc[read:dec.InputOffset()]); kind != "" {
+					return kind, true
+				}
+			}
+			parts = append(parts, AsGiven(s))
+		}
+	}
+	return ShownListSecretKind(parts), true
 }

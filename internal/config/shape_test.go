@@ -125,6 +125,7 @@ func TestAValueShownAsGivenIsQuotedWhenItHoldsACharacterThatIsNotPrintableOrAByt
 	}{
 		{"as given, a newline", asGivenShape, "x\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)", `"x\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)"`},
 		{"as given, a carriage return", asGivenShape, "x\rBYWARD_DEV=true", `"x\rBYWARD_DEV=true"`},
+		{"as given, a newline first", asGivenShape, "\nBYWARD_DEV=true", `"\nBYWARD_DEV=true"`},
 		{"as given, a terminal escape", asGivenShape, "x\x1b[2K", `"x\x1b[2K"`},
 		{"as given, a tab", asGivenShape, "a\tb", `"a\tb"`},
 		{"as given, DEL", asGivenShape, "a\x7fb", `"a\x7fb"`},

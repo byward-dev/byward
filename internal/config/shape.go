@@ -3,9 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/byward-dev/byward/internal/logging"
 )
@@ -64,16 +62,9 @@ var (
 // notShown is what a refusal of a value for its form shows of it: its length only (ADR-0031 §1).
 func notShown(raw string) string { return logging.NotShown(raw) }
 
-// displayAsGiven is raw as given, or quoted (strconv.Quote) when it holds a character that is not
-// printable, such as a newline, which would start a line of its own in --print-config and could
-// forge another setting's line there (#505), or a byte that is not UTF-8, which the printable test
-// reads as U+FFFD and would let through (a raw 0x9b is a terminal's CSI).
-func displayAsGiven(raw string) string {
-	if !utf8.ValidString(raw) || strings.ContainsFunc(raw, func(r rune) bool { return !strconv.IsPrint(r) }) {
-		return strconv.Quote(raw)
-	}
-	return raw
-}
+// displayAsGiven is raw as given, quoted when it holds a character that is not printable
+// (logging.AsGiven).
+func displayAsGiven(raw string) string { return logging.AsGiven(raw) }
 
 // displayURLList shows each entry of a comma-separated list that is a URL as logging.MarkedURL does,
 // and any other entry as displayAsGiven does.
