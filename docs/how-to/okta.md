@@ -87,3 +87,7 @@ an IdP alert, `credential_rejected`; an RSA key on PS256 also warns at startup a
 setting to fix. (The client credential check is new in v0.3.0; the doctor in v0.2.0 does not have
 it, and a wrong secret or key shows at the first sign-in as an IdP alert.) Then sign in from an MCP
 client ([oidc.md](oidc.md#5-check-it)).
+
+## See also
+
+- [Serve users from several identity providers](several-identity-providers.md): federate at the IdP, or run one byward per IdP.

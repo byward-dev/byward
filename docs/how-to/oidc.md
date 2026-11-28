@@ -115,3 +115,7 @@ Then connect an MCP client, sign in and call a tool. For Claude Code, as in the
 ```sh
 claude mcp add --transport http my-mcp https://mcp.example.com/mcp
 ```
+
+## See also
+
+- [Serve users from several identity providers](several-identity-providers.md): federate at the IdP, or run one byward per IdP.

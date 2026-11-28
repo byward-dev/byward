@@ -116,3 +116,7 @@ byward signs an RSA key with PS256 by default and an EC key with ES256, so:
 - Sign in from an MCP client ([run byward](run-byward.md#6-connect-a-client)): byward's consent page,
   then Auth0's login page. The user's `sub` looks like `auth0|…`.
 - Refresh: byward gives a refresh token to every client that registered the `refresh_token` grant, whether or not it asks for `offline_access` ([ADR-0006](../adr/0006-token-model.md), amended for #287).
+
+## See also
+
+- [Serve users from several identity providers](several-identity-providers.md): federate at the IdP, or run one byward per IdP.

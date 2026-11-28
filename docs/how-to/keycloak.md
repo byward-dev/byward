@@ -205,3 +205,7 @@ public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are
 - Refresh: Keycloak returns an ID token on refresh, which byward needs to recheck the gate. byward gives
   a refresh token to every client that registered the `refresh_token` grant, whether or not it asks
   for `offline_access` ([ADR-0006](../adr/0006-token-model.md), amended for #287).
+
+## See also
+
+- [Serve users from several identity providers](several-identity-providers.md): federate at the IdP, or run one byward per IdP.

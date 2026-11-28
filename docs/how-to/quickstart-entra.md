@@ -310,6 +310,7 @@ callback port" (<https://code.claude.com/docs/en/mcp>).
 - Back up the state directory: [state and backups](state.md).
 - Use a certificate instead of the client secret: [Entra certificate](entra-certificate.md).
 - Let the MCP server call Microsoft Graph or another API as the user: [downstream APIs](downstream-apis.md).
+- Let partners or users from another IdP in: [several identity providers](several-identity-providers.md).
 
 ## Troubleshooting
 
