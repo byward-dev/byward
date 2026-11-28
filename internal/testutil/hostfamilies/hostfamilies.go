@@ -67,7 +67,7 @@ var hostBases = []struct {
 	hosts  []string
 }{
 	{"name", []string{"mcp.example.com", "MCP.Example.COM", "app.example", "evil.example", "localhost", "LOCALHOST", "byward-metrics.monitoring.svc", "my_mcp", "single"}},
-	{"name edge", []string{"mcp.example.com.", "a..b", ".mcp.example.com", "-a.example", "a-.example", "mcp.10", "app.0x", "app.0XF", "10.0.0.999", "localhost.", "*.example.com", "u@mcp.example.com", "a?b.example", "a b.example", "a%41.example", "S3CRET~tok", "*", ".", "..", ""}},
+	{"name edge", []string{"mcp.example.com.", "app.example.", "xn--bcher-kva.example.", "a..b", ".mcp.example.com", "-a.example", "a-.example", "mcp.10", "app.0x", "app.0XF", "10.0.0.999", "localhost.", "*.example.com", "u@mcp.example.com", "a?b.example", "a b.example", "a%41.example", "S3CRET~tok", "*", ".", "..", ""}},
 	// Near misses of the hosts the columns' lists hold: a subdomain, a suffix without a dot, a prefix.
 	{"near miss", []string{"www.mcp.example.com", "sub.app.example", "evilmcp.example.com", "xapp.example", "mcp.example.com.evil.example", "sub.xn--bcher-kva.example"}},
 	{"idn", []string{"xn--bcher-kva.example", "bücher.example", "ｍｃｐ.example.com", "b%C3%BCcher.example", "faß.example", "faẞ.example"}},

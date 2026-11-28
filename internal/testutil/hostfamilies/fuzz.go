@@ -52,12 +52,10 @@ func (z fuzzer) check(t testing.TB, h string) {
 			known := z.isListed(c.Name, at, h)
 			// In a URL, a "/", "?", "#" or backslash ends the host: a list check judges the host before
 			// it, and the rest is a path (evil.example/@mcp.example.com is evil.example's).
-			if i := strings.IndexAny(h, "/?#\\"); c.Lists && !known && at[0] != "" && i >= 0 {
-				known = z.isListed(c.Name, at, h[:i])
+			if end := strings.IndexAny(h, "/?#\\"); c.Lists && !known && at[0] != "" && end >= 0 {
+				known = z.isListed(c.Name, at, h[:end])
 			}
-			host, port, err := z.split(h)
-			written := err == nil && hasWrittenForm(h, host, at[0] != "")
-			browser := at[0] + bracketed(z.serialize(host)) + port + at[1]
+			browser, written := z.writtenForm(at, h)
 			switch {
 			case c.Denies && known && pass:
 				t.Errorf("%s no longer stops %q, a spelling of an input testdata/hostdecisions.allowed says it stops (a widening)", c.Name, in)
@@ -82,8 +80,18 @@ func (z fuzzer) isListed(column string, at [2]string, h string) bool {
 	if z.listed[line(column, foldASCII(at[0]+h+at[1]))] {
 		return true
 	}
+	written, ok := z.writtenForm(at, h)
+	return ok && z.listed[line(column, foldASCII(written))]
+}
+
+// writtenForm is h placed at at with its host as browsers write it (split, then serialize, then the
+// port as written), and whether h has such a form.
+func (z fuzzer) writtenForm(at [2]string, h string) (string, bool) {
 	host, port, err := z.split(h)
-	return err == nil && hasWrittenForm(h, host, at[0] != "") && z.listed[line(column, foldASCII(at[0]+bracketed(z.serialize(host))+port+at[1]))]
+	if err != nil || !hasWrittenForm(h, host, at[0] != "") {
+		return "", false
+	}
+	return at[0] + bracketed(z.serialize(host)) + port + at[1], true
 }
 
 // hasWrittenForm reports whether h, split into host, has a form browsers write to compare: it is

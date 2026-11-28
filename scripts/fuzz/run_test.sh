@@ -29,7 +29,7 @@ case "\$1 \$2" in
     exit 1 ;;
   empty) printf 'ok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\n'; exit 0 ;;
   esac
-  printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nFuzzHostHeader\nFuzzHostDecisions\nok  \texample.com/m/c/d\t0.1s\n' |
+  printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nFuzzHostDecisionsX\nFuzzHostDecisions\nok  \texample.com/m/c/d\t0.1s\n' |
     awk -v p="\$3" '!/^Fuzz/ || \$0 ~ p'
   exit 0 ;;
 esac
@@ -59,7 +59,7 @@ exit 0
 EOF
 chmod +x "$tmp/bin/go"
 
-all="^\$ ^FuzzA\$ 1s example.com/m/a;^\$ ^FuzzB\$ 1s example.com/m/a;^\$ ^FuzzC\$ 1s example.com/m/c/d;^\$ ^FuzzHostHeader\$ 1s example.com/m/c/d"
+all="^\$ ^FuzzA\$ 1s example.com/m/a;^\$ ^FuzzB\$ 1s example.com/m/a;^\$ ^FuzzC\$ 1s example.com/m/c/d;^\$ ^FuzzHostDecisionsX\$ 1s example.com/m/c/d"
 fuzztime=1s # FUZZTIME for the next rows; empty leaves it unset
 fuzzmatch=  # FUZZMATCH for the next rows; empty leaves it unset
 
@@ -121,7 +121,8 @@ fuzztime=""
 run without-fuzztime-each-target-gets-2m ok "" "" 0 'fuzz lane: ok \(4 targets, 2m each\)' "" "$(printf '%s' "$all" | sed 's/ 1s / 2m /g')"
 fuzztime=1s
 # The host decision targets run only when FUZZMATCH asks for them (#661): the rows above leave
-# FuzzHostDecisions out, but not FuzzHostHeader, whose name only starts the same. FUZZMATCH picks targets by Go's pattern, and drops nothing else.
+# FuzzHostDecisions out, but not FuzzHostDecisionsX, whose name only starts the same.
+# FUZZMATCH picks targets by Go's pattern, and drops nothing else.
 fuzzmatch='^FuzzHostDecisions$'
 run fuzzmatch-runs-only-the-targets-it-names ok "" "" 0 'fuzz lane: ok \(1 targets, 1s each\)' "" "^\$ ^FuzzHostDecisions\$ 1s example.com/m/c/d"
 fuzzmatch='^Fuzz'

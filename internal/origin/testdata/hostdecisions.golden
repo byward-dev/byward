@@ -3,10 +3,10 @@
 # which is edited by hand; a denylist's lines there are the inputs it stops. A Go version that reads
 # a URL or an address differently changes these lines: that is a decision change too.
 
-## public Host: 25 pass, 9492 refused, of 9517
+## public Host: 25 pass, 9720 refused, of 9745
 by family:
   name                     pass     6  refused  1020
-  name edge                pass     0  refused  2280
+  name edge                pass     0  refused  2508
   near miss                pass     0  refused   684
   idn                      pass     3  refused   681
   ipv4                     pass     1  refused   569
@@ -16,39 +16,39 @@ by family:
   zone                     pass     0  refused  1537
   invisible                pass     0  refused   570
 by wrap:
-  bare                     pass    17  refused  1559
-  [h]                      pass     8  refused  1569
-  [h                       pass     0  refused  1576
-  h]                       pass     0  refused  1596
-  [h]]                     pass     0  refused  1596
-  [h]x                     pass     0  refused  1596
+  bare                     pass    17  refused  1597
+  [h]                      pass     8  refused  1607
+  [h                       pass     0  refused  1614
+  h]                       pass     0  refused  1634
+  [h]]                     pass     0  refused  1634
+  [h]x                     pass     0  refused  1634
 by port:
-  none                     pass     7  refused   492
-  :                        pass     0  refused   501
-  :443                     pass     5  refused   496
-  :80                      pass     5  refused   496
-  :8080                    pass     8  refused   493
-  :9090                    pass     0  refused   501
-  :65535                   pass     0  refused   501
-  :0                       pass     0  refused   501
-  :65536                   pass     0  refused   501
-  :123456                  pass     0  refused   501
-  :080                     pass     0  refused   501
-  :+80                     pass     0  refused   501
-  :-1                      pass     0  refused   501
-  :0x50                    pass     0  refused   501
-  :8a                      pass     0  refused   501
-  :８０                      pass     0  refused   501
-  :80:80                   pass     0  refused   501
-  :80:443                  pass     0  refused   501
-  :80]                     pass     0  refused   501
+  none                     pass     7  refused   504
+  :                        pass     0  refused   513
+  :443                     pass     5  refused   508
+  :80                      pass     5  refused   508
+  :8080                    pass     8  refused   505
+  :9090                    pass     0  refused   513
+  :65535                   pass     0  refused   513
+  :0                       pass     0  refused   513
+  :65536                   pass     0  refused   513
+  :123456                  pass     0  refused   513
+  :080                     pass     0  refused   513
+  :+80                     pass     0  refused   513
+  :-1                      pass     0  refused   513
+  :0x50                    pass     0  refused   513
+  :8a                      pass     0  refused   513
+  :８０                      pass     0  refused   513
+  :80:80                   pass     0  refused   513
+  :80:443                  pass     0  refused   513
+  :80]                     pass     0  refused   513
 refused because:
-   9492  421
+   9720  421
 
-## internal Host: 320 pass, 9197 refused, of 9517
+## internal Host: 320 pass, 9425 refused, of 9745
 by family:
   name                     pass    30  refused   996
-  name edge                pass     0  refused  2280
+  name edge                pass     0  refused  2508
   near miss                pass     0  refused   684
   idn                      pass     0  refused   684
   ipv4                     pass    50  refused   520
@@ -58,39 +58,39 @@ by family:
   zone                     pass     0  refused  1537
   invisible                pass     0  refused   570
 by wrap:
-  bare                     pass   213  refused  1363
-  [h]                      pass   100  refused  1477
-  [h                       pass     7  refused  1569
-  h]                       pass     0  refused  1596
-  [h]]                     pass     0  refused  1596
-  [h]x                     pass     0  refused  1596
+  bare                     pass   213  refused  1401
+  [h]                      pass   100  refused  1515
+  [h                       pass     7  refused  1607
+  h]                       pass     0  refused  1634
+  [h]]                     pass     0  refused  1634
+  [h]x                     pass     0  refused  1634
 by port:
-  none                     pass    34  refused   465
-  :                        pass    24  refused   477
-  :443                     pass    31  refused   470
-  :80                      pass    31  refused   470
-  :8080                    pass    31  refused   470
-  :9090                    pass    31  refused   470
-  :65535                   pass    24  refused   477
-  :0                       pass    31  refused   470
-  :65536                   pass    24  refused   477
-  :123456                  pass     0  refused   501
-  :080                     pass    31  refused   470
-  :+80                     pass     0  refused   501
-  :-1                      pass     0  refused   501
-  :0x50                    pass     0  refused   501
-  :8a                      pass     7  refused   494
-  :８０                      pass     0  refused   501
-  :80:80                   pass     7  refused   494
-  :80:443                  pass     7  refused   494
-  :80]                     pass     7  refused   494
+  none                     pass    34  refused   477
+  :                        pass    24  refused   489
+  :443                     pass    31  refused   482
+  :80                      pass    31  refused   482
+  :8080                    pass    31  refused   482
+  :9090                    pass    31  refused   482
+  :65535                   pass    24  refused   489
+  :0                       pass    31  refused   482
+  :65536                   pass    24  refused   489
+  :123456                  pass     0  refused   513
+  :080                     pass    31  refused   482
+  :+80                     pass     0  refused   513
+  :-1                      pass     0  refused   513
+  :0x50                    pass     0  refused   513
+  :8a                      pass     7  refused   506
+  :８０                      pass     0  refused   513
+  :80:80                   pass     7  refused   506
+  :80:443                  pass     7  refused   506
+  :80]                     pass     7  refused   506
 refused because:
-   9197  421
+   9425  421
 
-## Origin: 19 pass, 19033 refused, of 19052
+## Origin: 19 pass, 19489 refused, of 19508
 by family:
   name                     pass     6  refused  2046
-  name edge                pass     0  refused  4560
+  name edge                pass     0  refused  5016
   near miss                pass     0  refused  1368
   idn                      pass     2  refused  1366
   ipv4                     pass     1  refused  1139
@@ -101,12 +101,12 @@ by family:
   invisible                pass     0  refused  1140
   url shape                pass     1  refused    17
 by wrap:
-  bare                     pass    14  refused  3138
-  [h]                      pass     4  refused  3150
-  [h                       pass     0  refused  3152
-  h]                       pass     0  refused  3192
-  [h]]                     pass     0  refused  3192
-  [h]x                     pass     0  refused  3192
+  bare                     pass    14  refused  3214
+  [h]                      pass     4  refused  3226
+  [h                       pass     0  refused  3228
+  h]                       pass     0  refused  3268
+  [h]]                     pass     0  refused  3268
+  [h]x                     pass     0  refused  3268
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -126,25 +126,25 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass     6  refused   992
-  :                        pass     0  refused  1002
-  :443                     pass     6  refused   996
-  :80                      pass     0  refused  1002
-  :8080                    pass     6  refused   996
-  :9090                    pass     0  refused  1002
-  :65535                   pass     0  refused  1002
-  :0                       pass     0  refused  1002
-  :65536                   pass     0  refused  1002
-  :123456                  pass     0  refused  1002
-  :080                     pass     0  refused  1002
-  :+80                     pass     0  refused  1002
-  :-1                      pass     0  refused  1002
-  :0x50                    pass     0  refused  1002
-  :8a                      pass     0  refused  1002
-  :８０                      pass     0  refused  1002
-  :80:80                   pass     0  refused  1002
-  :80:443                  pass     0  refused  1002
-  :80]                     pass     0  refused  1002
+  none                     pass     6  refused  1016
+  :                        pass     0  refused  1026
+  :443                     pass     6  refused  1020
+  :80                      pass     0  refused  1026
+  :8080                    pass     6  refused  1020
+  :9090                    pass     0  refused  1026
+  :65535                   pass     0  refused  1026
+  :0                       pass     0  refused  1026
+  :65536                   pass     0  refused  1026
+  :123456                  pass     0  refused  1026
+  :080                     pass     0  refused  1026
+  :+80                     pass     0  refused  1026
+  :-1                      pass     0  refused  1026
+  :0x50                    pass     0  refused  1026
+  :8a                      pass     0  refused  1026
+  :８０                      pass     0  refused  1026
+  :80:80                   pass     0  refused  1026
+  :80:443                  pass     0  refused  1026
+  :80]                     pass     0  refused  1026
   -                        pass     1  refused    17
 refused because:
-  19033  403
+  19489  403
