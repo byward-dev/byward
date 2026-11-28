@@ -188,15 +188,6 @@ func TestADCRClientsRevocationOnARequestThatEndedStillEndsItsGrant(t *testing.T)
 	}
 }
 
-// wantBoundedIfLive is wantBounded for a store call whose context has not ended: one that can still
-// run after its request ended. A call still on the ended request's context fails anyway.
-func wantBoundedIfLive(t *testing.T, call context.Context) {
-	t.Helper()
-	if call.Err() == nil {
-		wantBounded(t, call)
-	}
-}
-
 // wantBounded fails t unless call, a store call's context, has a deadline at most 5 s away: a
 // revocation detached from its request is still bounded, so a stuck store cannot hold it past the
 // shutdown grace.
@@ -251,7 +242,7 @@ func TestARevocationWhoseClientAuthenticationIsAStoreCallStillEndsItsGrant(t *te
 			e.st.SQLContext()
 			e.st.AfterCall("RevokeGrant", func(call context.Context) {
 				wantBounded(t, call)
-				if d, _ := call.Deadline(); !d.After(lookup) {
+				if d, _ := call.Deadline(); lookup.IsZero() || !d.After(lookup) {
 					t.Errorf("the revocation's deadline %v is not after the lookup's %v: they share one bound", d, lookup)
 				}
 			})

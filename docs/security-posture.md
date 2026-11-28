@@ -183,7 +183,7 @@ bounds, but there are no settings for that yet.
   proxy's shutdown. That covers one the broker detects outside a refresh token's rotation (a reused
   code, a refresh token reused past the grace, a wrong binding, a denied or refused client), and one
   a client asks for at `/revoke`, the client's lookup and authentication included (a DCR client's lookup and a `private_key_jwt` assertion's replay check are store calls). Its store calls run detached from the
-  request, bounded at 5 s; three such calls in a row, the most one request makes, stay inside the shutdown grace. One case is left:
+  request, bounded at 5 s; three such calls in a row, the most one request makes, stay inside the shutdown grace. Two cases are left:
   see Known gaps. Before #693, a SQL store failed a revocation left on
   an ended request: the grant stayed live on every replica and its refresh tokens kept working,
   and only this replica's deny list stopped its access tokens.

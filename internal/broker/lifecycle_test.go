@@ -381,7 +381,7 @@ func TestARefusedClientWhoseRequestEndedStillLosesItsGrant(t *testing.T) {
 					c.refuse()
 					c.e.st.SQLContext()
 					for _, m := range []string{"Grant", "RefreshToken", "RevokeGrant"} { // the revocation and the lookup before it
-						c.e.st.AfterCall(m, func(call context.Context) { wantBoundedIfLive(t, call) })
+						c.e.st.AfterCall(m, func(call context.Context) { wantBounded(t, call) })
 					}
 					c.e.serveIn(endedCtx(end), formRequest(path, strings.NewReader(f.Encode())))
 					c.wantOneRevocation(t, grantID)
