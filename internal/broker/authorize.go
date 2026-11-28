@@ -234,6 +234,18 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 	start := time.Now()
 	target, err := b.cfg.IdP.AuthCodeURL(ctx, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
 	b.observeIdP(ctx, OpAuthorize, start, err)
+	if err != nil && (shutdown.ShuttingDown(ctx) || shutdown.ClientWentAway(ctx)) { // as refreshIdP's ended
+		// Discovery, before it is cached, ran under a request that ended: requestEnded's rule (refresh.go).
+		if idp.ClassOf(err) != idp.Unavailable { // err is not nil here
+			b.noteIdPFailure(r, l.ClientID, err)
+			if l.Silent { // the refusal's signals stay; only its redirect follows the ending (as refuseSilently)
+				b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentSilent, Outcome: audit.Failure, Reason: "temporarily_unavailable", ClientID: l.ClientID, IdP: b.cfg.IdPName})
+				b.cfg.ObserveConsent("", ConsentOutcomeSilentRefused)
+			}
+		}
+		shutdown.AnswerIfEnded(w, r)
+		return
+	}
 	if err != nil && l.Silent { // the IdP is not ready (discovery or keys down)
 		b.noteIdPFailure(r, l.ClientID, err)
 		b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the identity provider is not reachable; try again")

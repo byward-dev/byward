@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -118,10 +120,12 @@ func endedCtx(e lifecycle.Ended) context.Context {
 // a shutdown keeps its sign-in and a browser that went away gets nothing. The CIMD fetch's own cells
 // are in TestTheCIMDFetchLifecycleMatrix (internal/registration).
 //
-// The same class, outside these cells (#672 known residuals): /authorize's and /consent's IdP
-// discovery before a replica has cached it (AuthCodeURL) answers an ended request 502 and logs the
-// sign-in as failed; the throttled /authorize's lookup answers it 429, harmlessly; the admin consent
-// redirect has no wait (it logs one INFO line and shows a page).
+// An IdP call that fails on an ended request keeps the signals of a real IdP failure, and only an
+// Unavailable one, the ending's own, logs nothing (requestEnded's rule, #700).
+//
+// The same class, outside these cells (#672 known residuals): the throttled /authorize's lookup
+// answers an ended request 429, harmlessly; the admin consent redirect has no wait (it logs one
+// INFO line and shows a page).
 func TestTheBrokerLifecycleMatrix(t *testing.T) {
 	const (
 		whole       = "the broker writes whole answers: no interim response, stream, trailer or upgrade"
@@ -225,6 +229,109 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					if tc.mode == modeOK && !slices.Contains(e.idpOps[ops:], OpRefresh+" unavailable") {
 						t.Errorf("IdP calls %q; want the refresh to have reached the IdP", e.idpOps[ops:])
 					}
+				})
+			}
+			// /consent's allow starts the sign-in at the IdP (AuthCodeURL). Its discovery, before a
+			// replica has it, fails as the request's ending explains (Unavailable): nothing is logged
+			// or audited for it. Or it fails for real (any other class), and keeps its ERROR and its
+			// login failure. Either way the answer follows the ending (requestEnded's rule, #700).
+			for name, tc := range map[string]struct {
+				idpFor func(c *Config)
+				warns  []string
+				audit  []string
+			}{
+				"/consent, the IdP's discovery": {audit: []string{"consent_granted success"}}, // a fresh provider discovers under the ended request
+				"/consent, an IdP that fails": {
+					idpFor: func(c *Config) {
+						c.IdP = &failOnceIdP{IdP: c.IdP, err: &idp.Error{Class: idp.Fatal, Err: errors.New("discovery: issuer mismatch")}}
+					},
+					warns: []string{"IdP sign-in failed"}, audit: []string{"consent_granted success", "login failure"},
+				},
+				"/consent, an error of no IdP class": { // idp.ClassOf calls it Fatal: a real failure
+					idpFor: func(c *Config) { c.IdP = &failOnceIdP{IdP: c.IdP, err: errors.New("an error of no IdP class")} },
+					warns:  []string{"IdP sign-in failed"}, audit: []string{"consent_granted success", "login failure"},
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					var opts []func(*Config)
+					if tc.idpFor != nil {
+						opts = append(opts, tc.idpFor)
+					}
+					e := newEnv(t, opts...)
+					p := e.showConsent(t, nil)
+					e.now = e.now.Add(ConsentDelay)
+					lm, am := e.marks()
+					r := formRequest("/consent", strings.NewReader(url.Values{"flow": {p.flow}, "action": {"allow"}}.Encode()))
+					r.AddCookie(p.binding)
+					w := e.serveIn(endedCtx(end), r)
+					end.Answered(t, w)
+					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: tc.warns, audit: tc.audit})
+				})
+			}
+			// A prompt=none sign-in starts at the IdP from /authorize. An Unavailable failure on an
+			// ended request writes nothing; a real one keeps its ERROR, its login failure and its
+			// consent_silent refusal, and only the redirect follows the ending (requestEnded's rule).
+			for name, tc := range map[string]struct {
+				err     error
+				warns   []string
+				audit   []string
+				counted []string // the consent outcomes observed
+			}{
+				"/authorize prompt=none, the IdP's discovery": {err: &idp.Error{Class: idp.Unavailable, Err: context.Canceled}},
+				"/authorize prompt=none, an IdP that fails": {err: &idp.Error{Class: idp.Fatal, Err: errors.New("discovery: issuer mismatch")},
+					warns: []string{"IdP sign-in failed"}, audit: []string{"login failure", "consent_silent failure"}, counted: []string{" " + ConsentOutcomeSilentRefused}},
+				"/authorize prompt=none, an error of no IdP class": {err: errors.New("an error of no IdP class"),
+					warns: []string{"IdP sign-in failed"}, audit: []string{"login failure", "consent_silent failure"}, counted: []string{" " + ConsentOutcomeSilentRefused}},
+			} {
+				t.Run(name, func(t *testing.T) {
+					counted := &consentOutcomes{}
+					e := newEnv(t, withRemember(t, counted))
+					h := e.remember(t, nil) // its own sign-in discovers; the next AuthCodeURL fails
+					cfg := e.cfg
+					cfg.IdP = &failOnceIdP{IdP: cfg.IdP, err: tc.err}
+					e.start(t, cfg)
+					lm, am := e.marks()
+					before := len(counted.list())
+					r := httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+authorizeQuery(silent(nil)).Encode(), nil)
+					r.AddCookie(h)
+					w := e.serveIn(endedCtx(end), r)
+					end.Answered(t, w)
+					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: tc.warns, audit: tc.audit})
+					if got := counted.list()[before:]; !slices.Equal(got, tc.counted) {
+						t.Errorf("consent outcomes %q; want %q", got, tc.counted)
+					}
+				})
+			}
+			// Once discovery is cached, AuthCodeURL makes no call that the ending could fail: the
+			// sign-in goes on to the IdP as on a live request, with nothing logged as a failure.
+			t.Run("/authorize prompt=none, a cached discovery", func(t *testing.T) {
+				e := newEnv(t, withRemember(t, nil))
+				h := e.remember(t, nil) // its own sign-in discovers
+				lm, am := e.marks()
+				r := httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+authorizeQuery(silent(nil)).Encode(), nil)
+				r.AddCookie(h)
+				w := e.serveIn(endedCtx(end), r)
+				e.pinned(t, w, lm, am, brokerCell{status: http.StatusSeeOther})
+				if loc := w.Header().Get("Location"); !strings.Contains(loc, "/oauth2/v2.0/authorize") {
+					t.Errorf("redirected to %q; want the IdP's sign-in", loc)
+				}
+			})
+			// A refresh the IdP fails for real (not Unavailable), on an ended request: its ERROR and
+			// token_rejected stay; the answer follows the ending (requestEnded's rule, #700).
+			for name, refreshErr := range map[string]error{
+				"/token, an IdP refresh that fails":       &idp.Error{Class: idp.Fatal, Err: errors.New("the IdP answered garbage")},
+				"/token, a refresh error of no IdP class": errors.New("an error of no IdP class"), // the default branch, as Fatal
+			} {
+				t.Run(name, func(t *testing.T) {
+					e, d, _, tokens := offlineCIMD(t)
+					e.b.cfg.IdP = refresherFunc{IdP: e.b.cfg.IdP, refresh: func(context.Context, string) (*idp.Identity, idp.Tokens, error) {
+						return nil, idp.Tokens{}, refreshErr
+					}}
+					lm, am := e.marks()
+					f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
+					w := e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
+					end.Answered(t, w)
+					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: []string{"IdP refresh failed"}, audit: []string{"token_rejected failure"}})
 				})
 			}
 			// The callback has spent its login before it redeems the IdP's code, so it finishes, its

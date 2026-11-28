@@ -128,6 +128,14 @@ var idpUnavailable = tokenError{http.StatusServiceUnavailable, "temporarily_unav
 
 // requestEnded is refreshIdP's error for a refresh whose request ended while it waited on the
 // IdP: there is nothing to send but the ending's own answer (shutdown.AnswerIfEnded).
+//
+// The rule for an IdP call that fails on a request that ended (#700), here and in startLogin:
+//   - An idp.Unavailable failure is the ending's own: the call waited until its request ended. It
+//     is not logged, audited or counted as a failure; observeIdP still counts the attempt.
+//   - Any other failure is the IdP's, and the operator may need it. It keeps every signal it has
+//     on a live request: its ERROR log, observeIdP's alert and its audit event.
+//
+// Either way, the answer follows the ending.
 var requestEnded = tokenError{}
 
 // refreshIdP renews the grant's IdP tokens and re-checks the user (ADR-0006 §6, ADR-0012). It
@@ -155,22 +163,26 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	id, fresh, err := b.cfg.IdP.Refresh(ctx, old.RefreshToken)
 	b.observeIdP(ctx, OpRefresh, start, err)
 	if err != nil {
+		// The two endings are the ones shutdown.AnswerIfEnded and logging's endedBy test.
+		ended := shutdown.ShuttingDown(ctx) || shutdown.ClientWentAway(ctx)
 		var ie *idp.Error
 		switch {
 		case errors.As(err, &ie) && ie.Class == idp.SignInAgain:
 			// Log the IdP's error with the revocation: its code says why, and its trace and correlation
 			// IDs find the IdP's record (ADR-0021 §7).
 			return end("the IdP ended the session; grant revoked", append([]any{"error", err}, idpAttrs(err)...)...)
-		case errors.As(err, &ie) && ie.Class == idp.Unavailable && (shutdown.ShuttingDown(ctx) || shutdown.ClientWentAway(ctx)):
-			// The refresh waited until its request ended: no failure of the IdP's, and the caller
-			// answers by how the request ended (requestEnded, #672). The two endings are the ones
-			// shutdown.AnswerIfEnded and logging's endedBy test.
+		case errors.As(err, &ie) && ie.Class == idp.Unavailable && ended:
+			// The refresh waited until its request ended: no failure of the IdP's (requestEnded's rule).
 			return nil, assertedClaims{}, time.Time{}, requestEnded, false
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
 			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, idpAttrs(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, idpUnavailable, false
 		default:
 			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", append([]any{"error", err}, idpAttrs(err)...)...)
+			if ended { // the IdP's failure keeps its audit event; only the answer follows the ending (requestEnded's rule)
+				b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.TokenRejected, Outcome: audit.Failure, Reason: cannotRefresh.code}) // as tokenFail
+				return nil, assertedClaims{}, time.Time{}, requestEnded, false
+			}
 			return nil, assertedClaims{}, time.Time{}, cannotRefresh, false
 		}
 	}
