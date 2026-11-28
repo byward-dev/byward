@@ -247,6 +247,10 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					},
 					warns: []string{"IdP sign-in failed"}, audit: []string{"consent_granted success", "login failure"},
 				},
+				"/consent, an error of no IdP class": { // idp.ClassOf calls it Fatal: a real failure
+					idpFor: func(c *Config) { c.IdP = &failOnceIdP{IdP: c.IdP, err: errors.New("an error of no IdP class")} },
+					warns:  []string{"IdP sign-in failed"}, audit: []string{"consent_granted success", "login failure"},
+				},
 			} {
 				t.Run(name, func(t *testing.T) {
 					var opts []func(*Config)
@@ -276,6 +280,8 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				"/authorize prompt=none, the IdP's discovery": {err: &idp.Error{Class: idp.Unavailable, Err: context.Canceled}},
 				"/authorize prompt=none, an IdP that fails": {err: &idp.Error{Class: idp.Fatal, Err: errors.New("discovery: issuer mismatch")},
 					warns: []string{"IdP sign-in failed"}, audit: []string{"login failure", "consent_silent failure"}, counted: []string{" " + ConsentOutcomeSilentRefused}},
+				"/authorize prompt=none, an error of no IdP class": {err: errors.New("an error of no IdP class"),
+					warns: []string{"IdP sign-in failed"}, audit: []string{"login failure", "consent_silent failure"}, counted: []string{" " + ConsentOutcomeSilentRefused}},
 			} {
 				t.Run(name, func(t *testing.T) {
 					counted := &consentOutcomes{}
@@ -297,17 +303,22 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 			}
 			// A refresh the IdP fails for real (not Unavailable), on an ended request: its ERROR and
 			// token_rejected stay; the answer follows the ending (requestEnded's rule, #700).
-			t.Run("/token, an IdP refresh that fails", func(t *testing.T) {
-				e, d, _, tokens := offlineCIMD(t)
-				e.b.cfg.IdP = refresherFunc{IdP: e.b.cfg.IdP, refresh: func(context.Context, string) (*idp.Identity, idp.Tokens, error) {
-					return nil, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: errors.New("the IdP answered garbage")}
-				}}
-				lm, am := e.marks()
-				f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
-				w := e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
-				end.Answered(t, w)
-				e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: []string{"IdP refresh failed"}, audit: []string{"token_rejected failure"}})
-			})
+			for name, refreshErr := range map[string]error{
+				"/token, an IdP refresh that fails":       &idp.Error{Class: idp.Fatal, Err: errors.New("the IdP answered garbage")},
+				"/token, a refresh error of no IdP class": errors.New("an error of no IdP class"), // the default branch, as Fatal
+			} {
+				t.Run(name, func(t *testing.T) {
+					e, d, _, tokens := offlineCIMD(t)
+					e.b.cfg.IdP = refresherFunc{IdP: e.b.cfg.IdP, refresh: func(context.Context, string) (*idp.Identity, idp.Tokens, error) {
+						return nil, idp.Tokens{}, refreshErr
+					}}
+					lm, am := e.marks()
+					f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
+					w := e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
+					end.Answered(t, w)
+					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: []string{"IdP refresh failed"}, audit: []string{"token_rejected failure"}})
+				})
+			}
 			// The callback has spent its login before it redeems the IdP's code, so it finishes, its
 			// request ended or not: a shutdown's browser gets its sign-in; a browser that went away
 			// gets nothing, and no grant is made.
