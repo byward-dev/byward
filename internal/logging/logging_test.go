@@ -86,6 +86,7 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 		"a URL with a password in a stderr line":                       {value: "dial postgres://app:" + "Q7q7Q7" + "@db.example/app: refused", logged: redacted},
 		"a JSON line naming an origin, then an email":                  {value: `{"endpoint":"https://api.example.com","user":"bob@example.com"}`, logged: `{"endpoint":"https://api.example.com","user":"bob@example.com"}`},
 		"a password split across two JSON strings":                     {value: `{"a":"postgres://app:Hun","b":"ter2Q7@db.example/x"}`, logged: redacted}, // each reading through the handler (#657)
+		"a password key after an escaped backslash in a JSON string":   {value: `{"conn":"Server=db\\Password=s3cret"}`, logged: redacted},
 		"a JSON string with a control character before a password key": {value: `{"m":"host=db\u000bpassword=Q7Q7Q7"}`, logged: redacted},
 		"a password a comma and a space split":                         {value: "postgres://u:pa, " + "ss@h", logged: redacted},
 		"a URL list entry, a JWT cut short before a tab":               {value: "app.example," + "eyJ" + "hbGciOiJIUzI1NiJ9." + "eyJ" + "zdWIiOiJ4In0" + "\t", logged: redacted},

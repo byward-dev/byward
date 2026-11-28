@@ -71,7 +71,8 @@ var secretKinds = []struct{ value, class string }{
 	{"x\n" + fakeJWT(), "a JWT"},       // shown quoted, after the escape \n
 	{"Bearer%20" + fakeJWT(), "a JWT"}, // percent-escaped, as a URL's path shows it
 	{"postgres://app:" + "Q7Q7Q7Q7" + "\"@db.example/app", "a connection string with a password"},
-	{`{"m":"host=db\u000b` + `password=Q7Q7Q7"}`, "a connection string with a password"}, // a JSON string read as config shows it (logging.AsGiven)
+	{`{"m":"host=db\u000b` + `password=Q7Q7Q7"}`, "a connection string with a password"},  // a JSON string read as config shows it (logging.AsGiven)
+	{`{"conn":"Server=db\\` + `Password=s3cret"}`, "a connection string with a password"}, // a JSON string read as written
 }
 
 // kindRefusal is the refusal of a setting, named as given, whose value looks like class: shown by its

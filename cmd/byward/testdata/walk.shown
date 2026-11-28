@@ -17,11 +17,14 @@ startup log, a free-text setting | password cut across JSON, a password trimmed 
 --print-config, a free-text setting | password cut across JSON, text before the scheme | shown
 --print-config, a free-text setting | password cut across JSON, a percent-encoded @ | shown
 --print-config, a free-text setting | password cut across JSON, a password trimmed away | shown
+--print-config, a URL setting's path | password key after an escaped backslash in a JSON line | shown
 --print-config, a URL list setting's entry | opaque Bearer credential | shown
+--print-config, a URL list setting's entry | password key after an escaped backslash in a JSON line | shown
 --print-config, a path setting | opaque Bearer credential | shown
 --print-config, a path setting | DSN with JSON-escaped slashes, outside JSON | shown
 --print-config, the stdio upstream's program | opaque Bearer credential | shown
 --print-config, the stdio upstream's program | DSN with JSON-escaped slashes, outside JSON | shown
+init entra --public-url, in its path | password key after an escaped backslash in a JSON line | shown
 init entra --public-url, in its path | DSN with JSON-escaped slashes, outside JSON | shown
 init entra --upstream-url, in its query | DSN with JSON-escaped slashes, outside JSON | shown
 revoke-user under oidc, the user key | DSN with JSON-escaped slashes, outside JSON | shown

@@ -23,7 +23,7 @@ import (
 // redact-only, a Known gap (docs/security-posture.md), so its "shown" cells are pinned in walk.shown.
 var walkKinds = []string{"userinfo", "DSN key=value", "GitHub token", "Slack token", "JWT",
 	"GitHub token after a line break", "GitHub token percent-escaped", "opaque Bearer credential",
-	"DSN in a JSON line", "password key after a vertical tab"}
+	"DSN in a JSON line", "password key after a vertical tab", "password key after an escaped backslash in a JSON line"}
 
 // walkOnlyForms are forms the walk pins but the other leak tests do not take: a DSN with
 // JSON-escaped slashes outside a JSON document, which no kind matches, so it is shown, as on main (a
