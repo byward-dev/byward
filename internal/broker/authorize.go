@@ -234,6 +234,14 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 	start := time.Now()
 	target, err := b.cfg.IdP.AuthCodeURL(ctx, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
 	b.observeIdP(ctx, OpAuthorize, start, err)
+	if err != nil && (shutdown.ShuttingDown(ctx) || shutdown.ClientWentAway(ctx)) { // as refreshIdP's ended
+		// Discovery, before it is cached, ran under a request that ended: requestEnded's rule (refresh.go).
+		if ie := (*idp.Error)(nil); !errors.As(err, &ie) || ie.Class != idp.Unavailable {
+			b.noteIdPFailure(r, l.ClientID, err)
+		}
+		shutdown.AnswerIfEnded(w, r)
+		return
+	}
 	if err != nil && l.Silent { // the IdP is not ready (discovery or keys down)
 		b.noteIdPFailure(r, l.ClientID, err)
 		b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the identity provider is not reachable; try again")

@@ -113,12 +113,6 @@ func endedCtx(e lifecycle.Ended) context.Context {
 	return ctx
 }
 
-// idpCallsBug is what #700 fixes: an IdP call outside the callback whose request ended is answered
-// as an IdP failure: /consent's AuthCodeURL (discovery before a replica has it) with a 502, ERROR
-// and a login failure, and a refresh the IdP fails for real with a 500 and token_rejected, not by
-// how the request ended.
-const idpCallsBug = "an IdP call outside the callback whose request ended is answered as an IdP failure, not by how the request ended (#700)"
-
 // The broker's lifecycle matrix (#672): its requests' endings, crossed with the states its work
 // can be in: before its body read or client lookup, reading its body, and waiting on a client
 // lookup (the CIMD fetch, or a client's keys) or the IdP. A request that ended is answered by how it
@@ -126,10 +120,12 @@ const idpCallsBug = "an IdP call outside the callback whose request ended is ans
 // a shutdown keeps its sign-in and a browser that went away gets nothing. The CIMD fetch's own cells
 // are in TestTheCIMDFetchLifecycleMatrix (internal/registration).
 //
-// The same class, outside these cells (#672 known residuals): /authorize's and /consent's IdP
-// discovery before a replica has cached it (AuthCodeURL) answers an ended request 502 and logs the
-// sign-in as failed; the throttled /authorize's lookup answers it 429, harmlessly; the admin consent
-// redirect has no wait (it logs one INFO line and shows a page).
+// An IdP call that fails on an ended request keeps the signals of a real IdP failure, and only an
+// Unavailable one, the ending's own, logs nothing (requestEnded's rule, #700).
+//
+// The same class, outside these cells (#672 known residuals): the throttled /authorize's lookup
+// answers an ended request 429, harmlessly; the admin consent redirect has no wait (it logs one
+// INFO line and shows a page).
 func TestTheBrokerLifecycleMatrix(t *testing.T) {
 	const (
 		whole       = "the broker writes whole answers: no interim response, stream, trailer or upgrade"
@@ -188,7 +184,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 			})
 		})
 
-		m[at(end.Ending, lifecycle.AwaitingHeaders)] = lifecycle.KnownResidual("#700", idpCallsBug, func(t *testing.T) {
+		m[at(end.Ending, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
 			t.Run("/authorize", func(t *testing.T) {
 				e, d, mode := cimdEnv(t)
 				mode.Store(modeWaits)
@@ -235,19 +231,27 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					}
 				})
 			}
-			// /consent's allow starts the sign-in at the IdP (AuthCodeURL): its discovery, before a
-			// replica has it, fails as the request's ending explains (Unavailable), or as a real IdP
-			// failure (any other class).
-			for name, idpFor := range map[string]func(c *Config){
-				"/consent, the IdP's discovery": nil, // a fresh provider discovers under the ended request
-				"/consent, an IdP that fails": func(c *Config) {
-					c.IdP = &failOnceIdP{IdP: c.IdP, err: &idp.Error{Class: idp.Fatal, Err: errors.New("discovery: issuer mismatch")}}
+			// /consent's allow starts the sign-in at the IdP (AuthCodeURL). Its discovery, before a
+			// replica has it, fails as the request's ending explains (Unavailable): nothing is logged
+			// or audited for it. Or it fails for real (any other class), and keeps its ERROR and its
+			// login failure. Either way the answer follows the ending (requestEnded's rule, #700).
+			for name, tc := range map[string]struct {
+				idpFor func(c *Config)
+				warns  []string
+				audit  []string
+			}{
+				"/consent, the IdP's discovery": {audit: []string{"consent_granted success"}}, // a fresh provider discovers under the ended request
+				"/consent, an IdP that fails": {
+					idpFor: func(c *Config) {
+						c.IdP = &failOnceIdP{IdP: c.IdP, err: &idp.Error{Class: idp.Fatal, Err: errors.New("discovery: issuer mismatch")}}
+					},
+					warns: []string{"IdP sign-in failed"}, audit: []string{"consent_granted success", "login failure"},
 				},
 			} {
 				t.Run(name, func(t *testing.T) {
 					var opts []func(*Config)
-					if idpFor != nil {
-						opts = append(opts, idpFor)
+					if tc.idpFor != nil {
+						opts = append(opts, tc.idpFor)
 					}
 					e := newEnv(t, opts...)
 					p := e.showConsent(t, nil)
@@ -255,11 +259,13 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					lm, am := e.marks()
 					r := formRequest("/consent", strings.NewReader(url.Values{"flow": {p.flow}, "action": {"allow"}}.Encode()))
 					r.AddCookie(p.binding)
-					e.pinned(t, e.serveIn(endedCtx(end), r), lm, am, brokerCell{status: http.StatusBadGateway, body: "Signing in failed",
-						warns: []string{"IdP sign-in failed"}, audit: []string{"consent_granted success", "login failure"}})
+					w := e.serveIn(endedCtx(end), r)
+					end.Answered(t, w)
+					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: tc.warns, audit: tc.audit})
 				})
 			}
-			// A refresh the IdP fails for real (not Unavailable), on an ended request.
+			// A refresh the IdP fails for real (not Unavailable), on an ended request: its ERROR and
+			// token_rejected stay; the answer follows the ending (requestEnded's rule, #700).
 			t.Run("/token, an IdP refresh that fails", func(t *testing.T) {
 				e, d, _, tokens := offlineCIMD(t)
 				e.b.cfg.IdP = refresherFunc{IdP: e.b.cfg.IdP, refresh: func(context.Context, string) (*idp.Identity, idp.Tokens, error) {
@@ -267,8 +273,9 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				}}
 				lm, am := e.marks()
 				f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
-				e.pinned(t, e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode()))), lm, am,
-					brokerCell{status: http.StatusInternalServerError, body: "server_error", warns: []string{"IdP refresh failed"}, audit: []string{"token_rejected failure"}})
+				w := e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
+				end.Answered(t, w)
+				e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: []string{"IdP refresh failed"}, audit: []string{"token_rejected failure"}})
 			})
 			// The callback has spent its login before it redeems the IdP's code, so it finishes, its
 			// request ended or not: a shutdown's browser gets its sign-in; a browser that went away
