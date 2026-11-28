@@ -14,6 +14,7 @@ import (
 func TestEachFuzzRuleFailsTheColumnThatBreaksIt(t *testing.T) {
 	const col = "c"
 	bare, inURL := [][2]string{{"", ""}}, [][2]string{{"https://", "/x"}}
+	origin := [][2]string{{"https://", ""}} // an Origin's placing: no path after the host
 	passes := func(ins ...string) func(string) (bool, string) {
 		return func(in string) (bool, string) { return slices.Contains(ins, in), "refused" }
 	}
@@ -37,6 +38,13 @@ func TestEachFuzzRuleFailsTheColumnThatBreaksIt(t *testing.T) {
 		{"a list check passes a path with two delimiters after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com/a/b/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com/a/b", ""},
 		{"a denylist passes a path after a host it stops", Column{Denies: true, Judge: passes("https://mcp.example.com/a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com/a", ""},
 		{"a list check passes a listed input whose host holds a delimiter", Column{Lists: true, Judge: passes("https://a?b.example/x")}, inURL, []string{"https://a?b.example/x"}, "a?b.example", ""},
+		// An Origin holds no path, query or fragment: one that does is judged whole, not by its host.
+		{"an Origin check passes a path after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com/x")}, origin, []string{"https://mcp.example.com"}, "mcp.example.com/x",
+			`c passes "https://mcp.example.com/x", which testdata/hostdecisions.allowed lists in no letter case (a widening)`},
+		{"an Origin check passes a query after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com?q")}, origin, []string{"https://mcp.example.com"}, "mcp.example.com?q",
+			`c passes "https://mcp.example.com?q", which testdata/hostdecisions.allowed lists in no letter case (a widening)`},
+		{"an Origin check passes a fragment after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com#f")}, origin, []string{"https://mcp.example.com"}, "mcp.example.com#f",
+			`c passes "https://mcp.example.com#f", which testdata/hostdecisions.allowed lists in no letter case (a widening)`},
 		{"a list check passes a query after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com?a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com?a", ""},
 		{"a list check passes a fragment after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com#a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com#a", ""},
 		{"a list check passes a backslash path after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com\\a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com\\a", ""},
@@ -57,6 +65,7 @@ func TestEachFuzzRuleFailsTheColumnThatBreaksIt(t *testing.T) {
 		{"a check takes the form browsers write", Column{Judge: passes("0177.0.0.1:8080", "127.0.0.1:8080")}, bare, nil, "0177.0.0.1:8080", ""},
 		{"a zoned address keeps its brackets", Column{Judge: passes("[FE80::1%25eth0]", "[fe80::1%25eth0]")}, bare, nil, "[FE80::1%25eth0]", ""},
 		{"a host that is not UTF-8 has no written form", Column{Judge: passes("\xb6")}, bare, nil, "\xb6", ""},
+		{"a host Split refuses has no written form", Column{Judge: passes("[a")}, bare, nil, "[a", ""},
 		{"a host with white space at an end has no written form", Column{Judge: passes(" ::1")}, bare, nil, " ::1", ""},
 		{"an IPv6 address without brackets in a URL has no written form", Column{Judge: passes("https://::1/x")}, inURL, nil, "::1", ""},
 	} {

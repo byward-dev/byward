@@ -50,9 +50,11 @@ func (z fuzzer) check(t testing.TB, h string) {
 			in := at[0] + h + at[1]
 			pass, _ := c.Judge(in)
 			known := z.isListed(c.Name, at, h)
-			// In a URL, a "/", "?", "#" or backslash ends the host: a list check judges the host before
-			// it, and the rest is a path (evil.example/@mcp.example.com is evil.example's).
-			if end := strings.IndexAny(h, "/?#\\"); c.Lists && !known && at[0] != "" && end >= 0 {
+			// In a URL whose inputs carry a path (a CIMD client ID's /client.json), a "/", "?", "#" or
+			// backslash ends the host: a list check judges the host before it, and the rest is a path
+			// it does not judge (evil.example/@mcp.example.com is evil.example's). An input placed with
+			// no path after it (an Origin) is judged whole: a path, query or fragment is no part of it.
+			if end := strings.IndexAny(h, "/?#\\"); c.Lists && !known && at[0] != "" && at[1] != "" && end >= 0 {
 				known = z.isListed(c.Name, at, h[:end])
 			}
 			browser, written := z.writtenForm(at, h)
