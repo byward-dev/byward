@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -335,6 +336,35 @@ func TestLooksSecretReadsAtMost16KiB(t *testing.T) {
 	}
 	if tok := fakeToken("ghp_"); !LooksSecret(strings.Repeat("x", 16<<10-len(tok)-1) + " " + tok) {
 		t.Error("a token in a string of exactly 16 KiB is kept, want it read and redacted")
+	}
+	// A string read more than once (a , % or \, or not printable) is read up to MaxReread.
+	if LooksSecret(strings.Repeat("x,", 4<<10)) {
+		t.Error("a harmless string of 8 KiB with commas is redacted, want it read and kept")
+	}
+	if !LooksSecret(strings.Repeat("x,", 4<<10) + "x") {
+		t.Error("a string of 8 KiB and one byte with commas is kept, want it redacted unread")
+	}
+	if !LooksSecret(strings.Repeat("x", 16<<10) + "\x01") {
+		t.Error("a string over 16 KiB that is not printable is kept, want it redacted unread")
+	}
+	if tok := fakeToken("ghp_"); !LooksSecret(strings.Repeat("x,", (8<<10-len(tok)-1)/2) + " " + tok) {
+		t.Error("a token in a string under 8 KiB with commas is kept, want it read and redacted")
+	}
+	// A JSON document nested as a string in another, level after level, is read once per level,
+	// not twice: a request's path holding one must cost what one of its size costs.
+	nested := `["` + strings.Repeat("a", 8) + `"]`
+	for {
+		b, _ := json.Marshal(nested)
+		if len(b)+2 > MaxReread {
+			break
+		}
+		nested = "[" + string(b) + "]"
+	}
+	if LooksSecret(nested) {
+		t.Errorf("a harmless JSON document nested as strings, %d bytes, is redacted", len(nested))
+	}
+	if allocs := testing.AllocsPerRun(3, func() { LooksSecret(nested) }); allocs > 2000 { // 172 read once per level; 44,274 read twice
+		t.Errorf("a JSON document nested as strings, %d bytes, costs %.0f allocations, want it read once per level", len(nested), allocs)
 	}
 	// Unread: a longer string costs nothing, as the list and quoted readings would allocate.
 	if long := strings.Repeat("x,", 1<<19); testing.AllocsPerRun(10, func() { LooksSecret(long) }) != 0 {

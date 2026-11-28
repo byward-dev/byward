@@ -193,13 +193,27 @@ var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 // (#594). It decides how a value is shown, never whether it is accepted: it over-matches by design
 // (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides more, but refuses nothing.
 func LooksSecret(s string) bool {
-	return len(s) > lookedAtMax || authScheme.MatchString(s) || jwtShape.MatchString(s) || catalogueRefuses(s)
+	if len(s) > lookedAtMax || len(s) > MaxReread && rereads(s) {
+		return true // redacted unread
+	}
+	return authScheme.MatchString(s) || jwtShape.MatchString(s) || catalogueRefuses(s)
 }
+
+// MaxReread is the longest string LooksSecret reads more than once: one config would show quoted, or
+// with a %, \ or , that the catalogue reads again decoded or as a list's entries (rereads). Each
+// reading is another pass of the catalogue, so a longer such string is redacted unread, which only
+// ever hides more: a request's path, which the access log reads unauthenticated, costs at most about
+// 3 times main's worst (#657). It is at least a stdio upstream's MaxStderrLine, so no stderr line is
+// redacted unread for its length (TestNoStderrLineIsRedactedUnreadForItsLength).
+const MaxReread = 8 << 10
+
+// rereads reports whether catalogueRefuses reads s more than once.
+func rereads(s string) bool { return strings.ContainsAny(s, "%\\,") || AsGiven(s) != s }
 
 // lookedAtMax is the longest string LooksSecret reads; a longer one is redacted unread, which only
 // ever hides more, so a request's path or an attribute an unauthenticated client controls is read at
-// most 16 KiB long (#657). It is above MaxStderrLine (8 KiB), so no stdio upstream's stderr
-// line is affected. Config's refusal reads every value whole: only the redact grade is capped.
+// most 16 KiB long (#657), and one it would read more than once at most MaxReread. Config's
+// refusal reads every value whole: only the redact grade is capped.
 const lookedAtMax = 16 << 10
 
 // catalogueRefuses reports whether config would refuse s in a setting that is not secret, however

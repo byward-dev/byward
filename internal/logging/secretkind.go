@@ -170,6 +170,11 @@ func ShownListSecretKind(entries []string) string {
 	return ""
 }
 
+// isJSONDocument reports whether doc, trimmed, is a JSON object or array and nothing else.
+func isJSONDocument(doc string) bool {
+	return doc != "" && (doc[0] == '{' || doc[0] == '[') && json.Valid([]byte(doc))
+}
+
 // jsonKind reads shown, when it is a JSON document (an object or an array, nothing before or after
 // it but white space), by its parts: every key and every string, in the order the document holds
 // them, duplicate keys included, each as it would be shown on its own (AsGiven), read as a list's
@@ -181,7 +186,7 @@ func ShownListSecretKind(entries []string) string {
 // text, as before: that reading can only find more (#657).
 func jsonKind(shown string) (kind string, ok bool) {
 	doc := strings.TrimSpace(shown)
-	if doc == "" || doc[0] != '{' && doc[0] != '[' || !json.Valid([]byte(doc)) {
+	if !isJSONDocument(doc) {
 		return "", false
 	}
 	dec := json.NewDecoder(strings.NewReader(doc))
@@ -200,7 +205,7 @@ func jsonKind(shown string) (kind string, ok bool) {
 			// escape inside a URL's user part is a character of it, and one before a password key a
 			// break, as for a value outside JSON. It is read alone, so no match spans two strings;
 			// a string that is itself a JSON document is read by its parts only.
-			if _, isDoc := jsonKind(s); !isDoc {
+			if !isJSONDocument(strings.TrimSpace(s)) { // asked, not read: reading it here too would double each level's work
 				if kind := ShownSecretKind(doc[read:dec.InputOffset()]); kind != "" {
 					return kind, true
 				}
