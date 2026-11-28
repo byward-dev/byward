@@ -217,6 +217,7 @@ Decided values cite their ADR; everything else is **proposed — decided per fea
 | Request body | 8 MiB MCP route, 64 KiB OAuth endpoints, 16 KiB consent | **Decided**, ADR-0018 (consent amended 2026-11-06) |
 | HTTP upstream response headers | 5 min (1 s to 1 h); a stream is not limited once its headers arrive | **Decided**, ADR-0018 (amended 2026-11-06) |
 | Shutdown | ≤ 25 s (K8s grace 30 s) | **Decided**, ADR-0018 |
+| OAuth callback after its login is spent | 20 s, detached from the request, inside the shutdown grace | **Decided**, ADR-0018 (amended 2026-11-27) |
 | Proxy overhead | ≤ 2 ms p99 added latency per MCP request (measured ~84 µs on a laptop) | **Decided**, ADR-0024 |
 | Test lanes | `check` ≤ 90 s warm laptop, ≤ 3 min CI; `test:integration` ≤ 10 min | **Decided**, ADR-0024 |
 | Authorization code / consent state | 60 s single-use / 10 min | **Decided**, ADR-0006 / ADR-0010 |
