@@ -208,6 +208,19 @@ func TestTextFormatRedactsToo(t *testing.T) {
 	}
 }
 
+func TestTextFormatEscapesBidiUserKey(t *testing.T) {
+	var buf bytes.Buffer
+	const raw = "al\u202eice@example.com"
+	New(&buf, "text").Info("revoked", "user_key", raw)
+	out := buf.String()
+	if strings.Contains(out, "\u202e") {
+		t.Fatalf("text log contains raw bidi override: %q", out)
+	}
+	if !strings.Contains(out, `user_key="al\u202eice@example.com"`) {
+		t.Fatalf("text log did not escape user_key: %q", out)
+	}
+}
+
 func TestMiddlewareLogsRequestWithoutQueryOrHeaders(t *testing.T) {
 	var buf bytes.Buffer
 	var seen string
