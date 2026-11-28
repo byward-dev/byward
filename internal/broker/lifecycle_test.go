@@ -262,6 +262,9 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 			t.Run("/callback, the client lookup", func(t *testing.T) {
 				d := clientdocs.Load(t, "claude-ai")
 				lookups := &enteredLookups{entered: make(chan struct{}), release: make(chan struct{})}
+				var released sync.Once
+				release := func() { released.Do(func() { close(lookups.release) }) }
+				defer release() // a failing run lets a lookup that enters late go on, too
 				cimd := withCIMD(clientdocs.Serve(t, d))
 				e := newEnv(t, func(c *Config) { cimd(c); lookups.inner = c.Clients; c.Clients = lookups })
 				cookie, cb := e.startLogin(t, url.Values{"client_id": {d.ClientID}, "redirect_uri": {d.Redirect}, "scope": {"mcp offline_access"}})
@@ -279,7 +282,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					t.Fatal("the callback never looked the client up")
 				}
 				stop()
-				close(lookups.release)
+				release()
 				var w *httptest.ResponseRecorder
 				select {
 				case w = <-got:
@@ -346,5 +349,22 @@ func (e *env) callbackFinished(t *testing.T, end lifecycle.Ended, w *httptest.Re
 	g, err := e.st.Grant(context.Background(), firstGrant(e.st))
 	if err != nil || !slices.Contains(g.Scopes, "offline_access") {
 		t.Errorf("grant %+v, %v; want one that can refresh", g, err)
+	}
+}
+
+// A refused client is refused whether or not its request has ended: only a lookup that waited
+// (ErrUnavailable) is answered by how its request ended, so a refused document still revokes the
+// grant behind the presented refresh token (draft -03 §6.1; #672).
+func TestARefusedClientWhoseRequestEndedStillLosesItsGrant(t *testing.T) {
+	for _, end := range lifecycle.ContextEndings {
+		t.Run(end.Ending.String(), func(t *testing.T) {
+			e, d, mode, tokens := offlineCIMD(t)
+			mode.Store(modeRefused)
+			f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
+			e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
+			if got := e.auditEvents(t, "grant_revoked"); len(got) != 1 {
+				t.Fatalf("grant_revoked audited %d times; want the refused client's grant revoked once", len(got))
+			}
+		})
 	}
 }
