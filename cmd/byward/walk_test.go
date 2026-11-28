@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 
@@ -67,7 +66,12 @@ func walkSurfaces(t *testing.T) []walkSurface {
 			return exitOK, b.String()
 		}
 	}
-	revokeEnv := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
+	// revoke-user under an oidc IdP keyed on sub, with a store, takes any printable key, so each kind
+	// reaches the line that names a revoked key (LooksSecret); Entra would refuse every kind first.
+	revokeEnv, _, _ := operatorEnv(t, proxysStore)
+	revokeEnv = append(without(revokeEnv, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(revokeEnv, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
+		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
+	stdio := without(leakContexts(t, program)["stdio"], "BYWARD_UPSTREAM_COMMAND") // the program comes after --
 	return []walkSurface{
 		{"startup log, a free-text setting", "", "", proxy(nil, "BYWARD_OPERATOR_NAME")},
 		{"--print-config, a free-text setting", "", "", proxy([]string{"--print-config"}, "BYWARD_OPERATOR_NAME")},
@@ -76,6 +80,16 @@ func walkSurfaces(t *testing.T) []walkSurface {
 		}},
 		{"--print-config, a list setting's entry", "", "", func(v string) (int, string) {
 			return proxy([]string{"--print-config"}, "BYWARD_ALLOWED_HOSTS")("a.example," + v)
+		}},
+		{"--print-config, a URL list setting's entry", "", "", func(v string) (int, string) {
+			return proxy([]string{"--print-config"}, "BYWARD_CLIENT_DENYLIST")("https://a.example/" + v)
+		}},
+		{"--print-config, a path setting", "", "", func(v string) (int, string) {
+			return proxy([]string{"--print-config"}, "BYWARD_STORE_COUNTER_FILE")("/tmp/" + v)
+		}},
+		{"--print-config, the stdio upstream's program", "", "", func(v string) (int, string) {
+			code, stdout, stderr := runDone([]string{"--print-config", "--", v, "arg"}, withFormat(slices.Clone(stdio), "json")...)
+			return code, stdout + stderr
 		}},
 		{"check --offline, a free-text setting", "check", "", proxy([]string{"check", "--offline"}, "BYWARD_OPERATOR_NAME")},
 		{"doctor, a free-text setting", "doctor", "", proxy([]string{"doctor"}, "BYWARD_OPERATOR_NAME")},
@@ -86,7 +100,7 @@ func walkSurfaces(t *testing.T) []walkSurface {
 		{"init entra --upstream-url, in its query", "init", "upstream-url", cli(initWith("--upstream-url=https://up.example/mcp?k=@v@"))},
 		{"init entra --secret-years", "init", "secret-years", cli(initWith("--secret-years=@v@"))},
 		{"init entra --credential", "init", "credential", cli(initWith("--credential=@v@"))},
-		{"revoke-user, the user key", "revoke-user", "", cli(func(v string) []string { return []string{"revoke-user", v} }, revokeEnv...)},
+		{"revoke-user under oidc, the user key", "revoke-user", "", cli(func(v string) []string { return []string{"revoke-user", v} }, revokeEnv...)},
 		{"a log attribute, JSON", "", "", attribute("json", "refused", "reason")},
 		{"a log attribute, text", "", "", attribute("text", "refused", "reason")},
 		{"a stdio upstream's stderr line, as stdio logs it", "", "", attribute("json", "upstream stderr", "line")},
@@ -95,29 +109,27 @@ func walkSurfaces(t *testing.T) []walkSurface {
 
 // walkNoValue are the commands that print no value they are given, each with the test that shows it.
 var walkNoValue = map[string]string{
-	"revoke-all":       "takes only --yes: TestOperatorCommandsShowNoArgumentTheyAreGiven",
-	"store":            "takes only new-epoch --yes: TestOperatorCommandsShowNoArgumentTheyAreGiven",
+	"revoke-all":       "takes only --yes, and a stdio upstream's command after --, read as the proxy reads it (the program surface): TestOperatorCommandsShowNoArgumentTheyAreGiven",
+	"store":            "takes only new-epoch --yes, and a stdio upstream's command after --, read as the proxy reads it (the program surface): TestOperatorCommandsShowNoArgumentTheyAreGiven",
 	"jwks":             "takes no argument: TestOperatorCommandsShowNoArgumentTheyAreGiven",
 	"downstream-token": "takes only --json; reads only its socket: TestOperatorCommandsShowNoArgumentTheyAreGiven",
 }
 
 // walkGaps names each command with no surface and no entry in noValue, and each of init's flags with
-// no surface, so a new command or flag that can print a value fails the walk by name. It is the rule
-// TestOperatorCommandsShowNoArgumentTheyAreGiven keeps for arguments (its placed and coveredElsewhere),
-// applied to printed values and init's flags; a third caller would extract the two into one.
+// no surface, so a new command or flag that can print a value fails the walk by name (withoutCell,
+// the rule the operator-command and init tests keep too).
 func walkGaps(surfaces []walkSurface, cmds map[string]command, noValue map[string]string, initFlags *flag.FlagSet) []string {
 	var gaps []string
-	for name := range cmds {
-		if noValue[name] == "" && !slices.ContainsFunc(surfaces, func(s walkSurface) bool { return s.command == name }) {
-			gaps = append(gaps, "command "+name)
-		}
+	for _, name := range withoutCell(commandNames(cmds), func(n string) bool {
+		return noValue[n] != "" || slices.ContainsFunc(surfaces, func(s walkSurface) bool { return s.command == n })
+	}) {
+		gaps = append(gaps, "command "+name)
 	}
-	initFlags.VisitAll(func(f *flag.Flag) {
-		if !slices.ContainsFunc(surfaces, func(s walkSurface) bool { return s.command == "init" && s.flag == f.Name }) {
-			gaps = append(gaps, "init flag --"+f.Name)
-		}
-	})
-	sort.Strings(gaps)
+	for _, name := range withoutCell(flagNames(initFlags), func(n string) bool {
+		return slices.ContainsFunc(surfaces, func(s walkSurface) bool { return s.command == "init" && s.flag == n })
+	}) {
+		gaps = append(gaps, "init flag --"+name)
+	}
 	return gaps
 }
 
@@ -139,7 +151,8 @@ func walkOutcome(code int, out string) string {
 // Every surface that prints a value it was given decides every kind of the catalogue as
 // testdata/walk.golden records (#657, the decision golden of AGENTS.md's Pinned tier). The cells a
 // surface shows are listed again in testdata/walk.shown, so a cell newly shown is a reviewed diff of
-// that file: today only the opaque Bearer credential in a setting shown as given, a Known gap.
+// that file: today only the opaque Bearer credential, in each --print-config surface that shows the
+// value it was given (a Known gap, docs/security-posture.md).
 // Regenerate with BYWARD_UPDATE_GOLDEN=1 and review both diffs.
 func TestEveryPrintingSurfaceDecidesEveryKindAsPinned(t *testing.T) {
 	t.Setenv("PGSSLMODE", "verify-full")
@@ -188,7 +201,9 @@ func TestTheWalkNamesASurfaceItDoesNotCover(t *testing.T) {
 	}}}
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.String("probe-flag", "", "")
-	if got, want := walkGaps(nil, probe, nil, fs), []string{"command probe", "init flag --probe-flag"}; !slices.Equal(got, want) {
+	// A surface of another command, or of another init flag, covers neither (each half of the match).
+	others := []walkSurface{{command: "init", flag: "other"}, {command: "probe-other", flag: "probe-flag"}}
+	if got, want := walkGaps(others, probe, nil, fs), []string{"command probe", "init flag --probe-flag"}; !slices.Equal(got, want) {
 		t.Errorf("walkGaps = %q, want %q", got, want)
 	}
 	var out bytes.Buffer
@@ -200,7 +215,13 @@ func TestTheWalkNamesASurfaceItDoesNotCover(t *testing.T) {
 		code int
 		out  string
 		want string
-	}{{exitConfig, "BYWARD_X: want …; got a value (9 characters, not shown)", "refused"}, {exitOK, `{"reason":"[REDACTED]"}`, "redacted"}, {exitOK, "BYWARD_X=a", "kept out"}} {
+	}{
+		{exitConfig, "BYWARD_X: want …; got a value (9 characters, not shown)", "refused"},
+		{exitConfig, "BYWARD_X: want …; got x-" + canary, "shown"}, // a refusal that shows the value is shown
+		{exitConfig, `{"reason":"[REDACTED]"}`, "refused"},
+		{exitOK, `{"reason":"[REDACTED]"}`, "redacted"},
+		{exitOK, "BYWARD_X=a", "kept out"},
+	} {
 		if got := walkOutcome(tc.code, tc.out); got != tc.want {
 			t.Errorf("walkOutcome(%d, %q) = %q, want %q", tc.code, tc.out, got, tc.want)
 		}

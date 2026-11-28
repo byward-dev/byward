@@ -70,6 +70,7 @@ var secretKinds = []struct{ value, class string }{
 	{"Bearer " + fakeJWT(), "a JWT"},   // as an Authorization header's value
 	{"x\n" + fakeJWT(), "a JWT"},       // shown quoted, after the escape \n
 	{"Bearer%20" + fakeJWT(), "a JWT"}, // percent-escaped, as a URL's path shows it
+	{"postgres://app:" + "Q7Q7Q7Q7" + "\"@db.example/app", "a connection string with a password"},
 }
 
 // kindRefusal is the refusal of a setting, named as given, whose value looks like class: shown by its
@@ -420,6 +421,18 @@ func TestCheckShownRefusesAShownSecretAsLoadDoes(t *testing.T) {
 	for _, shown := range []string{"https://up.example/mcp?team=ghp-docs", ""} {
 		if err := CheckShown("upstream-url", shown); err != nil {
 			t.Errorf("CheckShown(%q) = %v, want nil", shown, err)
+		}
+	}
+}
+
+// A JSON line naming an origin and, later, an email holds no URL with a password: it loads in a
+// setting that is not secret, as logs keep it (#657).
+func TestAJSONLineNamingAnOriginAndAnEmailLoads(t *testing.T) {
+	s := lookup("operator-name")
+	c := readContextOf(s)
+	for _, value := range []string{`{"endpoint":"https://api.example.com","user":"bob@example.com"}`} {
+		if _, _, err := Load(c.args, append(slices.Clone(c.env), s.Env()+"="+value), c.files); err != nil {
+			t.Errorf("%s=%q: %v, want it to load", s.Env(), value, err)
 		}
 	}
 }

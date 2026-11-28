@@ -353,11 +353,9 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 		"credential":   {"the credential must be secret or certificate; got another value (", false},
 	}
 	fs, _ := newInitFlags(nil)
-	fs.VisitAll(func(f *flag.Flag) {
-		if _, ok := flagRefusals[f.Name]; !ok {
-			t.Errorf("init's flag --%s has no cell here", f.Name)
-		}
-	})
+	for _, name := range withoutCell(flagNames(fs), func(n string) bool { _, ok := flagRefusals[n]; return ok }) {
+		t.Errorf("init's flag --%s has no cell here", name)
+	}
 	type cell struct {
 		place, want string
 		exact       bool // want is all of stderr
@@ -426,7 +424,8 @@ func TestInitRefusesAURLItWouldPrintWithASecretInIt(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := runWith(append([]string{"init", "entra", "--tenant", tenant}, tc.args...), tc.env...)
-			if code != exitConfig || stdout != "" || !strings.HasPrefix(stderr, "byward: init: "+tc.variable+": ") || !strings.Contains(stderr, "it looks like "+tc.kind) {
+			flag := "--" + strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(tc.variable, "BYWARD_"), "_", "-"))
+			if code != exitConfig || stdout != "" || !strings.HasPrefix(stderr, "byward: init: "+tc.variable+": ") || !strings.HasSuffix(stderr, "it looks like "+tc.kind+" (give "+flag+")\n") {
 				t.Errorf("exit %d, stdout %q, stderr %q; want exit %d refusing %s as %s", code, stdout, stderr, exitConfig, tc.variable, tc.kind)
 			}
 			if strings.Contains(stderr, "Q7Q7") || strings.Contains(stderr, "zdWIi") {
@@ -443,8 +442,7 @@ func TestInitRefusesAURLItWouldPrintWithASecretInIt(t *testing.T) {
 // refused (it is no tid:oid), and named by its length, as init names a value it refuses (#594, ADR-0031 §1). Every form of a secret,
 // and a token's three segments, is given as the key; each must reach the refusal and show nothing.
 func TestRevokeUserShowsNoKeyItWasGiven(t *testing.T) {
-	keys := append(slices.Clone(secretForms), struct{ name, value string }{"JWT", "eyJhbGciOiJSUzI1NiJ9." + canary + ".c2lnbmF0dXJl"})
-	for _, key := range keys {
+	for _, key := range secretForms { // the JWT among them
 		t.Run(key.name, func(t *testing.T) {
 			code, stdout, stderr := runWith([]string{"revoke-user", key.value}, append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)...)
 			want := "byward: revoke-user " + logging.NotShown(key.value) + ": " + server.ErrNotAUserKey.Error() + "\n"
@@ -581,9 +579,37 @@ func TestOperatorCommandsShowNoArgumentTheyAreGiven(t *testing.T) {
 			cell{"revoke-user, entra", refused(v), []string{"revoke-user", v}, entraEnv},
 			cell{"revoke-user, oidc", oidcWant, []string{"revoke-user", v}, oidcEnv}))
 	}
-	for name := range commands {
-		if !placed[name] && coveredElsewhere[name] == "" {
-			t.Errorf("operator command %q has no cell here: add one, or name the test that covers it", name)
+	for _, name := range withoutCell(commandNames(commands), func(n string) bool { return placed[n] || coveredElsewhere[n] != "" }) {
+		t.Errorf("operator command %q has no cell here: add one, or name the test that covers it", name)
+	}
+}
+
+// withoutCell lists, sorted, each of names that hasCell says has no test cell: the one rule that
+// every command and every flag of init that can be given a value has one, kept by
+// TestOperatorCommandsShowNoArgumentTheyAreGiven, TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints
+// and the walk (walkGaps).
+func withoutCell(names []string, hasCell func(string) bool) []string {
+	var out []string
+	for _, n := range names {
+		if !hasCell(n) {
+			out = append(out, n)
 		}
 	}
+	slices.Sort(out)
+	return out
+}
+
+// commandNames are the names in cmds; flagNames those of fs's flags.
+func commandNames(cmds map[string]command) []string {
+	names := make([]string, 0, len(cmds))
+	for n := range cmds {
+		names = append(names, n)
+	}
+	return names
+}
+
+func flagNames(fs *flag.FlagSet) []string {
+	var names []string
+	fs.VisitAll(func(f *flag.Flag) { names = append(names, f.Name) })
+	return names
 }

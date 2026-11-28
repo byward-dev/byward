@@ -63,6 +63,21 @@ var secretKinds = []struct{ value, class string }{
 	{"Bearer " + token, jwtKind},   // as an Authorization header's value
 	{"x\n" + token, jwtKind},       // shown quoted, after the escape \n
 	{"Bearer%20" + token, jwtKind}, // percent-escaped, as a URL's path shows it
+	// A URL's password, under every scheme RFC 3986 allows, and with each user part.
+	{"S3://app:" + "Q7Q7Q7Q7" + "@bucket.example", passwordKind}, // an upper-case scheme start, a digit before ://
+	{"x+1://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},     // each of RFC 3986's scheme characters
+	{"x.1://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},
+	{"x-1://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},
+	{"redis://:" + "Q7Q7Q7Q7" + "@cache.example", passwordKind}, // an empty user name
+	{"A://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},      // a one-letter scheme, at each end of each range
+	{"Z://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},
+	{"a://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},
+	{"z://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},
+	{"s0://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind}, // a digit after the scheme's first letter, at each end of the range
+	{"s9://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},
+	{"postgres://app:" + "Q7Q7Q7Q7" + "\"@db.example/app", passwordKind},        // a " ending the password
+	{"postgres://app:" + "p\"w" + "Q7Q7Q7Q7" + "@db.example/app", passwordKind}, // a " inside it
+	{"postgres://app:" + "\"" + "@db.example/app", passwordKind},                // a password that is only a "
 }
 
 // secretKind names each kind, and nothing else: a prefix named in prose, with too few token
@@ -84,10 +99,15 @@ func TestSecretKindNamesOnlyTheKindsItLists(t *testing.T) {
 		"A" + fakeToken("ghp_"), "ghp_\t" + strings.Repeat("Q7", 18), "https://h.example/a:b@c", "https://h.example:8080/pkg@1.0",
 		"Z" + fakeToken("ghp_"), "z" + fakeToken("ghp_"), "9" + fakeToken("ghp_"), "0" + fakeToken("ghp_"), // a word's character before a prefix, at each end of each range
 		"postgres://app:@db.example/app", "a+password=b",
-		"docs at https://docs.example: ask ops@example.com",        // a space ends a URL's password
-		"docs at https://docs.example see ops:on-call@example.com", // and its user name
-		"https://ops@a.example:8443,ops@example.com",               // an @ ends a URL's user name
-		"smtp://ops:@mail.example,ops@example.com"} {               // and its password
+		"docs at https://docs.example: ask ops@example.com",                              // a space ends a URL's password
+		"docs at https://docs.example see ops:on-call@example.com",                       // and its user name
+		"https://ops@a.example:8443,ops@example.com",                                     // an @ ends a URL's user name
+		`{"level":"info","endpoint":"https://api.example.com","user":"bob@example.com"}`, // a JSON separator ends the user name
+		`{"iss":"https://login.example","email":"a@b.example"}`,
+		`{"u":"https://x.example"}, then bob@x.example`,                                     // a " before a }
+		`{"level":"info","endpoint":"https://api.example.com/v1","user":"bob@example.com"}`, // a path before the @
+		"url=https://api.example.com user=bob@example.com",                                  // a space before the @
+		"smtp://ops:@mail.example,ops@example.com"} {                                        // and its password
 		if got := secretKind(s); got != "" {
 			t.Errorf("secretKind(%q) = %q, want none", s, got)
 		}
@@ -114,40 +134,6 @@ func TestShownListSecretKindReadsEachEntryAndASplitPassword(t *testing.T) {
 	} {
 		if got := ShownListSecretKind(tc.entries); got != tc.want {
 			t.Errorf("ShownListSecretKind(%q) = %q, want %q", tc.entries, got, tc.want)
-		}
-	}
-}
-
-// A URL's password is found under every scheme RFC 3986 allows, and with an empty user name.
-func TestSecretKindReadsEveryURLSchemeAndUserPart(t *testing.T) {
-	pw := "Q7Q7" + "Q7Q7"
-	for _, s := range []string{
-		"S3://app:" + pw + "@bucket.example", // an upper-case scheme start, a digit before ://
-		"s3://app:" + pw + "@bucket.example", // a digit in the scheme
-		"x+1://app:" + pw + "@h.example",     // each of RFC 3986's scheme characters
-		"x.1://app:" + pw + "@h.example",
-		"x-1://app:" + pw + "@h.example",
-		"redis://:" + pw + "@cache.example", // an empty user name
-		"A://app:" + pw + "@h.example",      // a one-letter scheme, at each end of each range
-		"Z://app:" + pw + "@h.example",
-		"a://app:" + pw + "@h.example",
-		"z://app:" + pw + "@h.example",
-		"s0://app:" + pw + "@h.example", // a digit after the scheme's first letter, at each end of the range
-		"s9://app:" + pw + "@h.example",
-		"postgres://app:" + "p\"w" + pw + "@db.example/app", // a " in the password
-	} {
-		if got := secretKind(s); got != passwordKind {
-			t.Errorf("secretKind(%q) = %q, want %q", s, got, passwordKind)
-		}
-	}
-	for _, s := range []string{
-		`{"level":"info","endpoint":"https://api.example.com","user":"bob@example.com"}`, // a " ends the user name
-		`{"iss":"https://login.example","email":"a@b.example"}`,
-		`{"level":"info","endpoint":"https://api.example.com/v1","user":"bob@example.com"}`, // a path before the @
-		"url=https://api.example.com user=bob@example.com",                                  // a space before the @
-	} {
-		if got := secretKind(s); got != "" {
-			t.Errorf("secretKind(%q) = %q, want none", s, got)
 		}
 	}
 }
@@ -246,6 +232,28 @@ func TestEveryKindTheCatalogueRefusesIsRedacted(t *testing.T) {
 	for i, k := range secretKinds {
 		if !LooksSecret(k.value) || !LooksSecret(strconv.Quote(k.value)) {
 			t.Errorf("secretKinds[%d] (%s) is refused but not redacted, plain or quoted", i, k.class)
+		}
+	}
+}
+
+// What config refuses only as it shows a value, quoted because it is not printable, or as a list's
+// entries, logs hide in the raw text all the same (#657): a password key after a break that only
+// the quoted display shows as one (RE2's \s is ASCII), and a password a comma split, with a space
+// or a / before the later @, which ShownListSecretKind finds and the whole text's urlPassword does not.
+func TestWhatConfigRefusesAsItShowsAValueIsRedacted(t *testing.T) {
+	for _, v := range []string{
+		"host=db\v" + "password=Q7Q7Q7",
+		"host=db\x00" + "password=Q7Q7Q7",
+		"host=db\u00a0" + "password=Q7Q7Q7",
+		"\xff" + "password=Q7Q7Q7",
+	} {
+		if ShownSecretKind(AsGiven(v)) != passwordKind || !LooksSecret(v) {
+			t.Errorf("%q: refused as shown (%q) but redacted %v", v, ShownSecretKind(AsGiven(v)), LooksSecret(v))
+		}
+	}
+	for _, v := range []string{"postgres://u:pa, " + "ss@h", "postgres://u:pa,x/y," + "ss@h"} {
+		if ShownListSecretKind(strings.Split(v, ",")) != passwordKind || !LooksSecret(v) {
+			t.Errorf("%q: refused as a list but redacted %v", v, LooksSecret(v))
 		}
 	}
 }

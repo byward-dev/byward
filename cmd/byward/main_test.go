@@ -768,6 +768,9 @@ func TestRevokeUserNamesACredentialShapedKeyOnlyByItsLength(t *testing.T) {
 		{"email", "heyJoe.Smith.Jr@example.com", "(27 characters, not shown)"},
 		{"email", "jöhn@exämple.com", ""},
 		{"name", "José", ""},
+		{"sub", "ghp_" + canary + "Q7Q7Q7", "(19 characters, not shown)"}, // the catalogue's kinds (#657)
+		{"sub", "xoxb-" + canary + "-12345", "(20 characters, not shown)"},
+		{"sub", "postgres://u:" + canary + "@h", "(24 characters, not shown)"},
 	} {
 		t.Run(tc.claim+"/"+tc.key, func(t *testing.T) {
 			env, _, _ := operatorEnv(t, proxysStore)

@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -192,7 +193,14 @@ var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 // (#594). It decides how a value is shown, never whether it is accepted: it over-matches by design
 // (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides more, but refuses nothing.
 func LooksSecret(s string) bool {
-	return authScheme.MatchString(s) || jwtShape.MatchString(s) || ShownSecretKind(s) != ""
+	return authScheme.MatchString(s) || jwtShape.MatchString(s) || catalogueRefuses(s)
+}
+
+// catalogueRefuses reports whether config would refuse s in a setting that is not secret, however
+// that setting shows it: as given, quoted when it is not printable (AsGiven), or as a list's
+// entries, where a password a comma split is found (ShownListSecretKind).
+func catalogueRefuses(s string) bool {
+	return ShownSecretKind(s) != "" || ShownSecretKind(AsGiven(s)) != "" || ShownListSecretKind(strings.Split(s, ",")) != ""
 }
 
 // HoldsJWT reports whether s holds a compact JWS or JWE: a segment starting eyJ at the start of a

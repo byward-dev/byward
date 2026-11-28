@@ -31,6 +31,30 @@ startup log, a free-text setting | opaque Bearer credential | redacted
 --print-config, a list setting's entry | GitHub token after a line break | refused
 --print-config, a list setting's entry | GitHub token percent-escaped | refused
 --print-config, a list setting's entry | opaque Bearer credential | refused
+--print-config, a URL list setting's entry | userinfo | kept out
+--print-config, a URL list setting's entry | DSN key=value | refused
+--print-config, a URL list setting's entry | GitHub token | refused
+--print-config, a URL list setting's entry | Slack token | refused
+--print-config, a URL list setting's entry | JWT | refused
+--print-config, a URL list setting's entry | GitHub token after a line break | kept out
+--print-config, a URL list setting's entry | GitHub token percent-escaped | refused
+--print-config, a URL list setting's entry | opaque Bearer credential | shown
+--print-config, a path setting | userinfo | refused
+--print-config, a path setting | DSN key=value | refused
+--print-config, a path setting | GitHub token | refused
+--print-config, a path setting | Slack token | refused
+--print-config, a path setting | JWT | refused
+--print-config, a path setting | GitHub token after a line break | refused
+--print-config, a path setting | GitHub token percent-escaped | refused
+--print-config, a path setting | opaque Bearer credential | shown
+--print-config, the stdio upstream's program | userinfo | refused
+--print-config, the stdio upstream's program | DSN key=value | refused
+--print-config, the stdio upstream's program | GitHub token | refused
+--print-config, the stdio upstream's program | Slack token | refused
+--print-config, the stdio upstream's program | JWT | refused
+--print-config, the stdio upstream's program | GitHub token after a line break | refused
+--print-config, the stdio upstream's program | GitHub token percent-escaped | refused
+--print-config, the stdio upstream's program | opaque Bearer credential | shown
 check --offline, a free-text setting | userinfo | refused
 check --offline, a free-text setting | DSN key=value | refused
 check --offline, a free-text setting | GitHub token | refused
@@ -87,14 +111,14 @@ init entra --credential | JWT | refused
 init entra --credential | GitHub token after a line break | refused
 init entra --credential | GitHub token percent-escaped | refused
 init entra --credential | opaque Bearer credential | refused
-revoke-user, the user key | userinfo | refused
-revoke-user, the user key | DSN key=value | refused
-revoke-user, the user key | GitHub token | refused
-revoke-user, the user key | Slack token | refused
-revoke-user, the user key | JWT | refused
-revoke-user, the user key | GitHub token after a line break | refused
-revoke-user, the user key | GitHub token percent-escaped | refused
-revoke-user, the user key | opaque Bearer credential | refused
+revoke-user under oidc, the user key | userinfo | redacted
+revoke-user under oidc, the user key | DSN key=value | redacted
+revoke-user under oidc, the user key | GitHub token | redacted
+revoke-user under oidc, the user key | Slack token | redacted
+revoke-user under oidc, the user key | JWT | redacted
+revoke-user under oidc, the user key | GitHub token after a line break | refused
+revoke-user under oidc, the user key | GitHub token percent-escaped | redacted
+revoke-user under oidc, the user key | opaque Bearer credential | redacted
 a log attribute, JSON | userinfo | redacted
 a log attribute, JSON | DSN key=value | redacted
 a log attribute, JSON | GitHub token | redacted
