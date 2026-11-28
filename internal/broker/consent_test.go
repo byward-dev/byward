@@ -333,9 +333,10 @@ func TestAllowSendsTheUserToTheIdPAndAudits(t *testing.T) {
 	e.consentAudit(t, "consent_granted", "success")
 }
 
-// failOnceIdP fails the first AuthCodeURL, as an IdP outage would.
+// failOnceIdP fails the first AuthCodeURL, as an IdP outage would, with err when set.
 type failOnceIdP struct {
 	IdP
+	err    error
 	mu     sync.Mutex
 	failed bool
 }
@@ -346,6 +347,9 @@ func (f *failOnceIdP) AuthCodeURL(ctx context.Context, l idp.Login) (string, err
 	f.failed = true
 	f.mu.Unlock()
 	if first {
+		if f.err != nil {
+			return "", f.err
+		}
 		return "", &idp.Error{UserMessage: "Microsoft Entra is not answering."}
 	}
 	return f.IdP.AuthCodeURL(ctx, l)

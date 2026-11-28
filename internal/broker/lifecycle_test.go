@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -111,6 +113,12 @@ func endedCtx(e lifecycle.Ended) context.Context {
 	return ctx
 }
 
+// idpCallsBug is what #700 fixes: an IdP call outside the callback whose request ended is answered
+// as an IdP failure: /consent's AuthCodeURL (discovery before a replica has it) with a 502, ERROR
+// and a login failure, and a refresh the IdP fails for real with a 500 and token_rejected, not by
+// how the request ended.
+const idpCallsBug = "an IdP call outside the callback whose request ended is answered as an IdP failure, not by how the request ended (#700)"
+
 // The broker's lifecycle matrix (#672): its requests' endings, crossed with the states its work
 // can be in: before its body read or client lookup, reading its body, and waiting on a client
 // lookup (the CIMD fetch, or a client's keys) or the IdP. A request that ended is answered by how it
@@ -180,7 +188,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 			})
 		})
 
-		m[at(end.Ending, lifecycle.AwaitingHeaders)] = lifecycle.Pinned(func(t *testing.T) {
+		m[at(end.Ending, lifecycle.AwaitingHeaders)] = lifecycle.KnownResidual("#700", idpCallsBug, func(t *testing.T) {
 			t.Run("/authorize", func(t *testing.T) {
 				e, d, mode := cimdEnv(t)
 				mode.Store(modeWaits)
@@ -227,6 +235,41 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					}
 				})
 			}
+			// /consent's allow starts the sign-in at the IdP (AuthCodeURL): its discovery, before a
+			// replica has it, fails as the request's ending explains (Unavailable), or as a real IdP
+			// failure (any other class).
+			for name, idpFor := range map[string]func(c *Config){
+				"/consent, the IdP's discovery": nil, // a fresh provider discovers under the ended request
+				"/consent, an IdP that fails": func(c *Config) {
+					c.IdP = &failOnceIdP{IdP: c.IdP, err: &idp.Error{Class: idp.Fatal, Err: errors.New("discovery: issuer mismatch")}}
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					var opts []func(*Config)
+					if idpFor != nil {
+						opts = append(opts, idpFor)
+					}
+					e := newEnv(t, opts...)
+					p := e.showConsent(t, nil)
+					e.now = e.now.Add(ConsentDelay)
+					lm, am := e.marks()
+					r := formRequest("/consent", strings.NewReader(url.Values{"flow": {p.flow}, "action": {"allow"}}.Encode()))
+					r.AddCookie(p.binding)
+					e.pinned(t, e.serveIn(endedCtx(end), r), lm, am, brokerCell{status: http.StatusBadGateway, body: "Signing in failed",
+						warns: []string{"IdP sign-in failed"}, audit: []string{"consent_granted success", "login failure"}})
+				})
+			}
+			// A refresh the IdP fails for real (not Unavailable), on an ended request.
+			t.Run("/token, an IdP refresh that fails", func(t *testing.T) {
+				e, d, _, tokens := offlineCIMD(t)
+				e.b.cfg.IdP = refresherFunc{IdP: e.b.cfg.IdP, refresh: func(context.Context, string) (*idp.Identity, idp.Tokens, error) {
+					return nil, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: errors.New("the IdP answered garbage")}
+				}}
+				lm, am := e.marks()
+				f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
+				e.pinned(t, e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode()))), lm, am,
+					brokerCell{status: http.StatusInternalServerError, body: "server_error", warns: []string{"IdP refresh failed"}, audit: []string{"token_rejected failure"}})
+			})
 			// The callback has spent its login before it redeems the IdP's code, so it finishes, its
 			// request ended or not: a shutdown's browser gets its sign-in; a browser that went away
 			// gets nothing, and no grant is made.
