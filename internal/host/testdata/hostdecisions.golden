@@ -3,7 +3,7 @@
 # which is edited by hand; a denylist's lines there are the inputs it stops. A Go version that reads
 # a URL or an address differently changes these lines: that is a decision change too.
 
-## loopback as written: 84 pass, 9661 refused, of 9745
+## loopback as written: 84 pass, 10573 refused, of 10657
 by family:
   name                     pass    20  refused  1006
   name edge                pass     0  refused  2508
@@ -15,32 +15,34 @@ by family:
   ipv4-mapped              pass    22  refused   320
   zone                     pass     0  refused  1537
   invisible                pass     0  refused   570
+  not UTF-8                pass     0  refused   456
+  unicode fold             pass     0  refused   456
 by wrap:
-  bare                     pass    44  refused  1570
-  [h]                      pass    40  refused  1575
-  [h                       pass     0  refused  1614
-  h]                       pass     0  refused  1634
-  [h]]                     pass     0  refused  1634
-  [h]x                     pass     0  refused  1634
+  bare                     pass    44  refused  1722
+  [h]                      pass    40  refused  1727
+  [h                       pass     0  refused  1766
+  h]                       pass     0  refused  1786
+  [h]]                     pass     0  refused  1786
+  [h]x                     pass     0  refused  1786
 by port:
-  none                     pass    12  refused   499
-  :                        pass     8  refused   505
-  :443                     pass     8  refused   505
-  :80                      pass     8  refused   505
-  :8080                    pass     8  refused   505
-  :9090                    pass     8  refused   505
-  :65535                   pass     8  refused   505
-  :0                       pass     8  refused   505
-  :65536                   pass     8  refused   505
-  :123456                  pass     0  refused   513
-  :080                     pass     8  refused   505
-  :+80                     pass     0  refused   513
-  :-1                      pass     0  refused   513
-  :0x50                    pass     0  refused   513
-  :8a                      pass     0  refused   513
-  :８０                      pass     0  refused   513
-  :80:80                   pass     0  refused   513
-  :80:443                  pass     0  refused   513
-  :80]                     pass     0  refused   513
+  none                     pass    12  refused   547
+  :                        pass     8  refused   553
+  :443                     pass     8  refused   553
+  :80                      pass     8  refused   553
+  :8080                    pass     8  refused   553
+  :9090                    pass     8  refused   553
+  :65535                   pass     8  refused   553
+  :0                       pass     8  refused   553
+  :65536                   pass     8  refused   553
+  :123456                  pass     0  refused   561
+  :080                     pass     8  refused   553
+  :+80                     pass     0  refused   561
+  :-1                      pass     0  refused   561
+  :0x50                    pass     0  refused   561
+  :8a                      pass     0  refused   561
+  :８０                      pass     0  refused   561
+  :80:80                   pass     0  refused   561
+  :80:443                  pass     0  refused   561
+  :80]                     pass     0  refused   561
 refused because:
-   9661  not loopback
+  10573  not loopback

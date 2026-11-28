@@ -3,7 +3,7 @@
 # which is edited by hand; a denylist's lines there are the inputs it stops. A Go version that reads
 # a URL or an address differently changes these lines: that is a decision change too.
 
-## CIMD client ID: 341 pass, 9422 refused, of 9763
+## CIMD client ID: 341 pass, 10334 refused, of 10675
 by family:
   name                     pass    54  refused   972
   name edge                pass    99  refused  2409
@@ -15,14 +15,16 @@ by family:
   ipv4-mapped              pass    10  refused   332
   zone                     pass    17  refused  1520
   invisible                pass     0  refused   570
+  not UTF-8                pass     0  refused   456
+  unicode fold             pass     0  refused   456
   url shape                pass     2  refused    16
 by wrap:
-  bare                     pass   138  refused  1476
-  [h]                      pass    35  refused  1580
-  [h                       pass     9  refused  1605
-  h]                       pass   147  refused  1487
-  [h]]                     pass     8  refused  1626
-  [h]x                     pass     2  refused  1632
+  bare                     pass   138  refused  1628
+  [h]                      pass    35  refused  1732
+  [h                       pass     9  refused  1757
+  h]                       pass   147  refused  1639
+  [h]]                     pass     8  refused  1778
+  [h]x                     pass     2  refused  1784
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -42,29 +44,29 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   108  refused   403
-  :                        pass   108  refused   405
-  :443                     pass   108  refused   405
-  :80                      pass     0  refused   513
-  :8080                    pass     0  refused   513
-  :9090                    pass     0  refused   513
-  :65535                   pass     0  refused   513
-  :0                       pass     0  refused   513
-  :65536                   pass     0  refused   513
-  :123456                  pass     0  refused   513
-  :080                     pass     0  refused   513
-  :+80                     pass     0  refused   513
-  :-1                      pass     0  refused   513
-  :0x50                    pass     0  refused   513
-  :8a                      pass     0  refused   513
-  :８０                      pass     0  refused   513
-  :80:80                   pass     0  refused   513
-  :80:443                  pass     0  refused   513
-  :80]                     pass    15  refused   498
+  none                     pass   108  refused   451
+  :                        pass   108  refused   453
+  :443                     pass   108  refused   453
+  :80                      pass     0  refused   561
+  :8080                    pass     0  refused   561
+  :9090                    pass     0  refused   561
+  :65535                   pass     0  refused   561
+  :0                       pass     0  refused   561
+  :65536                   pass     0  refused   561
+  :123456                  pass     0  refused   561
+  :080                     pass     0  refused   561
+  :+80                     pass     0  refused   561
+  :-1                      pass     0  refused   561
+  :0x50                    pass     0  refused   561
+  :8a                      pass     0  refused   561
+  :８０                      pass     0  refused   561
+  :80:80                   pass     0  refused   561
+  :80:443                  pass     0  refused   561
+  :80]                     pass    15  refused   546
   -                        pass     2  refused    16
 refused because:
    6464  client ID metadata document URL: not an absolute URL
-   1918  client ID metadata document URL: must be printable ASCII
+   2830  client ID metadata document URL: must be printable ASCII
     864  client ID metadata document URL: only port 443 is fetched
     111  client ID metadata document URL: must not have a query
      25  client ID metadata document URL: must not contain user information
@@ -73,7 +75,7 @@ refused because:
       6  not an https URL
       2  client ID metadata document URL: must not have a fragment
 
-## CIMD allowed host: 23 pass, 9740 refused, of 9763
+## CIMD allowed host: 23 pass, 10652 refused, of 10675
 by family:
   name                     pass     9  refused  1017
   name edge                pass     9  refused  2499
@@ -85,14 +87,16 @@ by family:
   ipv4-mapped              pass     0  refused   342
   zone                     pass     0  refused  1537
   invisible                pass     0  refused   570
+  not UTF-8                pass     0  refused   456
+  unicode fold             pass     0  refused   456
   url shape                pass     2  refused    16
 by wrap:
-  bare                     pass    21  refused  1593
-  [h]                      pass     0  refused  1615
-  [h                       pass     0  refused  1614
-  h]                       pass     0  refused  1634
-  [h]]                     pass     0  refused  1634
-  [h]x                     pass     0  refused  1634
+  bare                     pass    21  refused  1745
+  [h]                      pass     0  refused  1767
+  [h                       pass     0  refused  1766
+  h]                       pass     0  refused  1786
+  [h]]                     pass     0  refused  1786
+  [h]x                     pass     0  refused  1786
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -112,29 +116,29 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass     7  refused   504
-  :                        pass     7  refused   506
-  :443                     pass     7  refused   506
-  :80                      pass     0  refused   513
-  :8080                    pass     0  refused   513
-  :9090                    pass     0  refused   513
-  :65535                   pass     0  refused   513
-  :0                       pass     0  refused   513
-  :65536                   pass     0  refused   513
-  :123456                  pass     0  refused   513
-  :080                     pass     0  refused   513
-  :+80                     pass     0  refused   513
-  :-1                      pass     0  refused   513
-  :0x50                    pass     0  refused   513
-  :8a                      pass     0  refused   513
-  :８０                      pass     0  refused   513
-  :80:80                   pass     0  refused   513
-  :80:443                  pass     0  refused   513
-  :80]                     pass     0  refused   513
+  none                     pass     7  refused   552
+  :                        pass     7  refused   554
+  :443                     pass     7  refused   554
+  :80                      pass     0  refused   561
+  :8080                    pass     0  refused   561
+  :9090                    pass     0  refused   561
+  :65535                   pass     0  refused   561
+  :0                       pass     0  refused   561
+  :65536                   pass     0  refused   561
+  :123456                  pass     0  refused   561
+  :080                     pass     0  refused   561
+  :+80                     pass     0  refused   561
+  :-1                      pass     0  refused   561
+  :0x50                    pass     0  refused   561
+  :8a                      pass     0  refused   561
+  :８０                      pass     0  refused   561
+  :80:80                   pass     0  refused   561
+  :80:443                  pass     0  refused   561
+  :80]                     pass     0  refused   561
   -                        pass     2  refused    16
 refused because:
    6464  client ID metadata document URL: not an absolute URL
-   1918  client ID metadata document URL: must be printable ASCII
+   2830  client ID metadata document URL: must be printable ASCII
     864  client ID metadata document URL: only port 443 is fetched
     318  the CIMD host is not allowed
     111  client ID metadata document URL: must not have a query
@@ -144,7 +148,7 @@ refused because:
       6  not an https URL
       2  client ID metadata document URL: must not have a fragment
 
-## CIMD trusted host: 12 pass, 9751 refused, of 9763
+## CIMD trusted host: 12 pass, 10663 refused, of 10675
 by family:
   name                     pass     3  refused  1023
   name edge                pass     6  refused  2502
@@ -156,14 +160,16 @@ by family:
   ipv4-mapped              pass     0  refused   342
   zone                     pass     0  refused  1537
   invisible                pass     0  refused   570
+  not UTF-8                pass     0  refused   456
+  unicode fold             pass     0  refused   456
   url shape                pass     0  refused    18
 by wrap:
-  bare                     pass    12  refused  1602
-  [h]                      pass     0  refused  1615
-  [h                       pass     0  refused  1614
-  h]                       pass     0  refused  1634
-  [h]]                     pass     0  refused  1634
-  [h]x                     pass     0  refused  1634
+  bare                     pass    12  refused  1754
+  [h]                      pass     0  refused  1767
+  [h                       pass     0  refused  1766
+  h]                       pass     0  refused  1786
+  [h]]                     pass     0  refused  1786
+  [h]x                     pass     0  refused  1786
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -183,31 +189,31 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass     4  refused   507
-  :                        pass     4  refused   509
-  :443                     pass     4  refused   509
-  :80                      pass     0  refused   513
-  :8080                    pass     0  refused   513
-  :9090                    pass     0  refused   513
-  :65535                   pass     0  refused   513
-  :0                       pass     0  refused   513
-  :65536                   pass     0  refused   513
-  :123456                  pass     0  refused   513
-  :080                     pass     0  refused   513
-  :+80                     pass     0  refused   513
-  :-1                      pass     0  refused   513
-  :0x50                    pass     0  refused   513
-  :8a                      pass     0  refused   513
-  :８０                      pass     0  refused   513
-  :80:80                   pass     0  refused   513
-  :80:443                  pass     0  refused   513
-  :80]                     pass     0  refused   513
+  none                     pass     4  refused   555
+  :                        pass     4  refused   557
+  :443                     pass     4  refused   557
+  :80                      pass     0  refused   561
+  :8080                    pass     0  refused   561
+  :9090                    pass     0  refused   561
+  :65535                   pass     0  refused   561
+  :0                       pass     0  refused   561
+  :65536                   pass     0  refused   561
+  :123456                  pass     0  refused   561
+  :080                     pass     0  refused   561
+  :+80                     pass     0  refused   561
+  :-1                      pass     0  refused   561
+  :0x50                    pass     0  refused   561
+  :8a                      pass     0  refused   561
+  :８０                      pass     0  refused   561
+  :80:80                   pass     0  refused   561
+  :80:443                  pass     0  refused   561
+  :80]                     pass     0  refused   561
   -                        pass     0  refused    18
 refused because:
-   9740  no client
+  10652  no client
      11  trust domain
 
-## denylist entry: 635 pass, 18873 refused, of 19508
+## denylist entry: 677 pass, 20655 refused, of 21332
 by family:
   name                     pass    84  refused  1968
   name edge                pass   189  refused  4827
@@ -219,14 +225,16 @@ by family:
   ipv4-mapped              pass    10  refused   674
   zone                     pass    17  refused  3057
   invisible                pass    30  refused  1110
+  not UTF-8                pass    24  refused   888
+  unicode fold             pass    18  refused   894
   url shape                pass     2  refused    16
 by wrap:
-  bare                     pass   187  refused  3041
-  [h]                      pass    84  refused  3146
-  [h                       pass    58  refused  3170
-  h]                       pass   196  refused  3072
-  [h]]                     pass    57  refused  3211
-  [h]x                     pass    51  refused  3217
+  bare                     pass   194  refused  3338
+  [h]                      pass    91  refused  3443
+  [h                       pass    65  refused  3467
+  h]                       pass   203  refused  3369
+  [h]]                     pass    64  refused  3508
+  [h]x                     pass    58  refused  3514
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -246,30 +254,30 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   402  refused   620
-  :                        pass   108  refused   918
-  :443                     pass   108  refused   918
-  :80                      pass     0  refused  1026
-  :8080                    pass     0  refused  1026
-  :9090                    pass     0  refused  1026
-  :65535                   pass     0  refused  1026
-  :0                       pass     0  refused  1026
-  :65536                   pass     0  refused  1026
-  :123456                  pass     0  refused  1026
-  :080                     pass     0  refused  1026
-  :+80                     pass     0  refused  1026
-  :-1                      pass     0  refused  1026
-  :0x50                    pass     0  refused  1026
-  :8a                      pass     0  refused  1026
-  :８０                      pass     0  refused  1026
-  :80:80                   pass     0  refused  1026
-  :80:443                  pass     0  refused  1026
-  :80]                     pass    15  refused  1011
+  none                     pass   444  refused   674
+  :                        pass   108  refused  1014
+  :443                     pass   108  refused  1014
+  :80                      pass     0  refused  1122
+  :8080                    pass     0  refused  1122
+  :9090                    pass     0  refused  1122
+  :65535                   pass     0  refused  1122
+  :0                       pass     0  refused  1122
+  :65536                   pass     0  refused  1122
+  :123456                  pass     0  refused  1122
+  :080                     pass     0  refused  1122
+  :+80                     pass     0  refused  1122
+  :-1                      pass     0  refused  1122
+  :0x50                    pass     0  refused  1122
+  :8a                      pass     0  refused  1122
+  :８０                      pass     0  refused  1122
+  :80:80                   pass     0  refused  1122
+  :80:443                  pass     0  refused  1122
+  :80]                     pass    15  refused  1107
   -                        pass     2  refused    16
 refused because:
-   9457  it is neither a CIMD client ID (https URL) nor a host name
+  10327  it is neither a CIMD client ID (https URL) nor a host name
    6464  it is not a client ID metadata document URL: not an absolute URL
-   1918  it is not a client ID metadata document URL: must be printable ASCII
+   2830  it is not a client ID metadata document URL: must be printable ASCII
     864  it is not a client ID metadata document URL: only port 443 is fetched
     111  it is not a client ID metadata document URL: must not have a query
      25  it is not a client ID metadata document URL: must not contain user information
@@ -277,7 +285,7 @@ refused because:
      10  it is not a client ID metadata document URL: must have a host before its port
       2  it is not a client ID metadata document URL: must not have a fragment
 
-## denylist client ID: 9541 pass, 222 refused, of 9763
+## denylist client ID: 10442 pass, 233 refused, of 10675
 by family:
   name                     pass  1004  refused    22
   name edge                pass  2475  refused    33
@@ -289,14 +297,16 @@ by family:
   ipv4-mapped              pass   320  refused    22
   zone                     pass  1537  refused     0
   invisible                pass   559  refused    11
+  not UTF-8                pass   456  refused     0
+  unicode fold             pass   445  refused    11
   url shape                pass    16  refused     2
 by wrap:
-  bare                     pass  1438  refused   176
-  [h]                      pass  1571  refused    44
-  [h                       pass  1614  refused     0
-  h]                       pass  1634  refused     0
-  [h]]                     pass  1634  refused     0
-  [h]x                     pass  1634  refused     0
+  bare                     pass  1579  refused   187
+  [h]                      pass  1723  refused    44
+  [h                       pass  1766  refused     0
+  h]                       pass  1786  refused     0
+  [h]]                     pass  1786  refused     0
+  [h]x                     pass  1786  refused     0
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -316,30 +326,30 @@ by wrap:
   white space              pass     1  refused     0
   backslash                pass     1  refused     0
 by port:
-  none                     pass   491  refused    20
-  :                        pass   493  refused    20
-  :443                     pass   493  refused    20
-  :80                      pass   493  refused    20
-  :8080                    pass   493  refused    20
-  :9090                    pass   493  refused    20
-  :65535                   pass   493  refused    20
-  :0                       pass   493  refused    20
-  :65536                   pass   493  refused    20
-  :123456                  pass   493  refused    20
-  :080                     pass   493  refused    20
-  :+80                     pass   513  refused     0
-  :-1                      pass   513  refused     0
-  :0x50                    pass   513  refused     0
-  :8a                      pass   513  refused     0
-  :８０                      pass   513  refused     0
-  :80:80                   pass   513  refused     0
-  :80:443                  pass   513  refused     0
-  :80]                     pass   513  refused     0
+  none                     pass   538  refused    21
+  :                        pass   540  refused    21
+  :443                     pass   540  refused    21
+  :80                      pass   540  refused    21
+  :8080                    pass   540  refused    21
+  :9090                    pass   540  refused    21
+  :65535                   pass   540  refused    21
+  :0                       pass   540  refused    21
+  :65536                   pass   540  refused    21
+  :123456                  pass   540  refused    21
+  :080                     pass   540  refused    21
+  :+80                     pass   561  refused     0
+  :-1                      pass   561  refused     0
+  :0x50                    pass   561  refused     0
+  :8a                      pass   561  refused     0
+  :８０                      pass   561  refused     0
+  :80:80                   pass   561  refused     0
+  :80:443                  pass   561  refused     0
+  :80]                     pass   561  refused     0
   -                        pass    16  refused     2
 refused because:
-    222  denied
+    233  denied
 
-## denylist redirect: 19361 pass, 147 refused, of 19508
+## denylist redirect: 21163 pass, 169 refused, of 21332
 by family:
   name                     pass  2019  refused    33
   name edge                pass  4994  refused    22
@@ -351,14 +361,16 @@ by family:
   ipv4-mapped              pass   684  refused     0
   zone                     pass  3074  refused     0
   invisible                pass  1118  refused    22
+  not UTF-8                pass   912  refused     0
+  unicode fold             pass   890  refused    22
   url shape                pass    14  refused     4
 by wrap:
-  bare                     pass  3085  refused   143
-  [h]                      pass  3230  refused     0
-  [h                       pass  3228  refused     0
-  h]                       pass  3268  refused     0
-  [h]]                     pass  3268  refused     0
-  [h]x                     pass  3268  refused     0
+  bare                     pass  3367  refused   165
+  [h]                      pass  3534  refused     0
+  [h                       pass  3532  refused     0
+  h]                       pass  3572  refused     0
+  [h]]                     pass  3572  refused     0
+  [h]x                     pass  3572  refused     0
   scheme in upper case     pass     1  refused     0
   user and password        pass     1  refused     0
   empty user info          pass     1  refused     0
@@ -378,30 +390,30 @@ by wrap:
   white space              pass     1  refused     0
   backslash                pass     1  refused     0
 by port:
-  none                     pass  1009  refused    13
-  :                        pass  1013  refused    13
-  :443                     pass  1013  refused    13
-  :80                      pass  1013  refused    13
-  :8080                    pass  1013  refused    13
-  :9090                    pass  1013  refused    13
-  :65535                   pass  1013  refused    13
-  :0                       pass  1013  refused    13
-  :65536                   pass  1013  refused    13
-  :123456                  pass  1013  refused    13
-  :080                     pass  1013  refused    13
-  :+80                     pass  1026  refused     0
-  :-1                      pass  1026  refused     0
-  :0x50                    pass  1026  refused     0
-  :8a                      pass  1026  refused     0
-  :８０                      pass  1026  refused     0
-  :80:80                   pass  1026  refused     0
-  :80:443                  pass  1026  refused     0
-  :80]                     pass  1026  refused     0
+  none                     pass  1103  refused    15
+  :                        pass  1107  refused    15
+  :443                     pass  1107  refused    15
+  :80                      pass  1107  refused    15
+  :8080                    pass  1107  refused    15
+  :9090                    pass  1107  refused    15
+  :65535                   pass  1107  refused    15
+  :0                       pass  1107  refused    15
+  :65536                   pass  1107  refused    15
+  :123456                  pass  1107  refused    15
+  :080                     pass  1107  refused    15
+  :+80                     pass  1122  refused     0
+  :-1                      pass  1122  refused     0
+  :0x50                    pass  1122  refused     0
+  :8a                      pass  1122  refused     0
+  :８０                      pass  1122  refused     0
+  :80:80                   pass  1122  refused     0
+  :80:443                  pass  1122  refused     0
+  :80]                     pass  1122  refused     0
   -                        pass    14  refused     4
 refused because:
-    147  denied
+    169  denied
 
-## redirect URI: 1455 pass, 18053 refused, of 19508
+## redirect URI: 1631 pass, 19701 refused, of 21332
 by family:
   name                     pass   209  refused  1843
   name edge                pass   379  refused  4637
@@ -413,14 +425,16 @@ by family:
   ipv4-mapped              pass    34  refused   650
   zone                     pass    41  refused  3033
   invisible                pass   110  refused  1030
+  not UTF-8                pass    88  refused   824
+  unicode fold             pass    88  refused   824
   url shape                pass     5  refused    13
 by wrap:
-  bare                     pass   646  refused  2582
-  [h]                      pass   134  refused  3096
-  [h                       pass     9  refused  3219
-  h]                       pass   635  refused  2633
-  [h]]                     pass    24  refused  3244
-  [h]x                     pass     2  refused  3266
+  bare                     pass   734  refused  2798
+  [h]                      pass   134  refused  3400
+  [h                       pass     9  refused  3523
+  h]                       pass   723  refused  2849
+  [h]]                     pass    24  refused  3548
+  [h]x                     pass     2  refused  3570
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -440,34 +454,34 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   129  refused   893
-  :                        pass   129  refused   897
-  :443                     pass   129  refused   897
-  :80                      pass   129  refused   897
-  :8080                    pass   129  refused   897
-  :9090                    pass   129  refused   897
-  :65535                   pass   129  refused   897
-  :0                       pass   129  refused   897
-  :65536                   pass   129  refused   897
-  :123456                  pass   129  refused   897
-  :080                     pass   129  refused   897
-  :+80                     pass     2  refused  1024
-  :-1                      pass     2  refused  1024
-  :0x50                    pass     2  refused  1024
-  :8a                      pass     2  refused  1024
-  :８０                      pass     2  refused  1024
-  :80:80                   pass     2  refused  1024
-  :80:443                  pass     2  refused  1024
-  :80]                     pass    17  refused  1009
+  none                     pass   145  refused   973
+  :                        pass   145  refused   977
+  :443                     pass   145  refused   977
+  :80                      pass   145  refused   977
+  :8080                    pass   145  refused   977
+  :9090                    pass   145  refused   977
+  :65535                   pass   145  refused   977
+  :0                       pass   145  refused   977
+  :65536                   pass   145  refused   977
+  :123456                  pass   145  refused   977
+  :080                     pass   145  refused   977
+  :+80                     pass     2  refused  1120
+  :-1                      pass     2  refused  1120
+  :0x50                    pass     2  refused  1120
+  :8a                      pass     2  refused  1120
+  :８０                      pass     2  refused  1120
+  :80:80                   pass     2  refused  1120
+  :80:443                  pass     2  refused  1120
+  :80]                     pass    17  refused  1105
   -                        pass     5  refused    13
 refused because:
-  16162  malformed
-   1386  scheme
+  17634  malformed
+   1562  scheme
     456  wildcard
      47  userinfo
       2  fragment
 
-## loopback redirect: 11 pass, 19497 refused, of 19508
+## loopback redirect: 11 pass, 21321 refused, of 21332
 by family:
   name                     pass     0  refused  2052
   name edge                pass     0  refused  5016
@@ -479,14 +493,16 @@ by family:
   ipv4-mapped              pass     0  refused   684
   zone                     pass     0  refused  3074
   invisible                pass     0  refused  1140
+  not UTF-8                pass     0  refused   912
+  unicode fold             pass     0  refused   912
   url shape                pass     0  refused    18
 by wrap:
-  bare                     pass    11  refused  3217
-  [h]                      pass     0  refused  3230
-  [h                       pass     0  refused  3228
-  h]                       pass     0  refused  3268
-  [h]]                     pass     0  refused  3268
-  [h]x                     pass     0  refused  3268
+  bare                     pass    11  refused  3521
+  [h]                      pass     0  refused  3534
+  [h                       pass     0  refused  3532
+  h]                       pass     0  refused  3572
+  [h]]                     pass     0  refused  3572
+  [h]x                     pass     0  refused  3572
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -506,35 +522,35 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass     1  refused  1021
-  :                        pass     1  refused  1025
-  :443                     pass     1  refused  1025
-  :80                      pass     1  refused  1025
-  :8080                    pass     1  refused  1025
-  :9090                    pass     1  refused  1025
-  :65535                   pass     1  refused  1025
-  :0                       pass     1  refused  1025
-  :65536                   pass     1  refused  1025
-  :123456                  pass     1  refused  1025
-  :080                     pass     1  refused  1025
-  :+80                     pass     0  refused  1026
-  :-1                      pass     0  refused  1026
-  :0x50                    pass     0  refused  1026
-  :8a                      pass     0  refused  1026
-  :８０                      pass     0  refused  1026
-  :80:80                   pass     0  refused  1026
-  :80:443                  pass     0  refused  1026
-  :80]                     pass     0  refused  1026
+  none                     pass     1  refused  1117
+  :                        pass     1  refused  1121
+  :443                     pass     1  refused  1121
+  :80                      pass     1  refused  1121
+  :8080                    pass     1  refused  1121
+  :9090                    pass     1  refused  1121
+  :65535                   pass     1  refused  1121
+  :0                       pass     1  refused  1121
+  :65536                   pass     1  refused  1121
+  :123456                  pass     1  refused  1121
+  :080                     pass     1  refused  1121
+  :+80                     pass     0  refused  1122
+  :-1                      pass     0  refused  1122
+  :0x50                    pass     0  refused  1122
+  :8a                      pass     0  refused  1122
+  :８０                      pass     0  refused  1122
+  :80:80                   pass     0  refused  1122
+  :80:443                  pass     0  refused  1122
+  :80]                     pass     0  refused  1122
   -                        pass     0  refused    18
 refused because:
-  16162  malformed
-   1444  not_registered
-   1386  scheme
+  17634  malformed
+   1620  not_registered
+   1562  scheme
     456  wildcard
      47  userinfo
       2  fragment
 
-## consent redirect key: 27 pass, 19481 refused, of 19508
+## consent redirect key: 27 pass, 21305 refused, of 21332
 by family:
   name                     pass     9  refused  2043
   name edge                pass     0  refused  5016
@@ -546,14 +562,16 @@ by family:
   ipv4-mapped              pass     0  refused   684
   zone                     pass     0  refused  3074
   invisible                pass     0  refused  1140
+  not UTF-8                pass     0  refused   912
+  unicode fold             pass     0  refused   912
   url shape                pass     0  refused    18
 by wrap:
-  bare                     pass    18  refused  3210
-  [h]                      pass     9  refused  3221
-  [h                       pass     0  refused  3228
-  h]                       pass     0  refused  3268
-  [h]]                     pass     0  refused  3268
-  [h]x                     pass     0  refused  3268
+  bare                     pass    18  refused  3514
+  [h]                      pass     9  refused  3525
+  [h                       pass     0  refused  3532
+  h]                       pass     0  refused  3572
+  [h]]                     pass     0  refused  3572
+  [h]x                     pass     0  refused  3572
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -573,25 +591,25 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass     0  refused  1022
-  :                        pass     0  refused  1026
-  :443                     pass     3  refused  1023
-  :80                      pass     3  refused  1023
-  :8080                    pass     3  refused  1023
-  :9090                    pass     3  refused  1023
-  :65535                   pass     3  refused  1023
-  :0                       pass     3  refused  1023
-  :65536                   pass     3  refused  1023
-  :123456                  pass     3  refused  1023
-  :080                     pass     3  refused  1023
-  :+80                     pass     0  refused  1026
-  :-1                      pass     0  refused  1026
-  :0x50                    pass     0  refused  1026
-  :8a                      pass     0  refused  1026
-  :８０                      pass     0  refused  1026
-  :80:80                   pass     0  refused  1026
-  :80:443                  pass     0  refused  1026
-  :80]                     pass     0  refused  1026
+  none                     pass     0  refused  1118
+  :                        pass     0  refused  1122
+  :443                     pass     3  refused  1119
+  :80                      pass     3  refused  1119
+  :8080                    pass     3  refused  1119
+  :9090                    pass     3  refused  1119
+  :65535                   pass     3  refused  1119
+  :0                       pass     3  refused  1119
+  :65536                   pass     3  refused  1119
+  :123456                  pass     3  refused  1119
+  :080                     pass     3  refused  1119
+  :+80                     pass     0  refused  1122
+  :-1                      pass     0  refused  1122
+  :0x50                    pass     0  refused  1122
+  :8a                      pass     0  refused  1122
+  :８０                      pass     0  refused  1122
+  :80:80                   pass     0  refused  1122
+  :80:443                  pass     0  refused  1122
+  :80]                     pass     0  refused  1122
   -                        pass     0  refused    18
 refused because:
-  19481  compared as written
+  21305  compared as written
