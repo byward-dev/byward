@@ -36,6 +36,7 @@ func TestEachFuzzRuleFailsTheColumnThatBreaksIt(t *testing.T) {
 		{"a list check passes another spelling of a listed address before a path", Column{Lists: true, Judge: passes("https://127.1/a/x")}, inURL, []string{"https://127.0.0.1/x"}, "127.1/a", ""},
 		{"a list check passes a path with two delimiters after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com/a/b/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com/a/b", ""},
 		{"a denylist passes a path after a host it stops", Column{Denies: true, Judge: passes("https://mcp.example.com/a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com/a", ""},
+		{"a list check passes a listed input whose host holds a delimiter", Column{Lists: true, Judge: passes("https://a?b.example/x")}, inURL, []string{"https://a?b.example/x"}, "a?b.example", ""},
 		{"a list check passes a query after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com?a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com?a", ""},
 		{"a list check passes a fragment after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com#a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com#a", ""},
 		{"a list check passes a backslash path after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com\\a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com\\a", ""},
