@@ -19,14 +19,18 @@ import (
 type Store struct {
 	*memory.Store
 	mu            sync.Mutex
-	fail          map[string]error // by method name
-	down          error            // every method
+	fail          map[string]error                 // by method name
+	after         map[string]func(context.Context) // by method name, run once the call returns
+	down          error                            // every method
+	sqlContext    bool                             // a call under an ended context fails, as on a SQL store
 	onCreateGrant func(*store.Grant)
 	grantIDs      []string
 }
 
 // New returns an empty store with no failures.
-func New() *Store { return &Store{Store: memory.New(), fail: map[string]error{}} }
+func New() *Store {
+	return &Store{Store: memory.New(), fail: map[string]error{}, after: map[string]func(context.Context){}}
+}
 
 // methods are store.Store's method names; Fail refuses any other, so a typo cannot silently
 // inject nothing.
@@ -56,6 +60,49 @@ func (s *Store) Fail(err error, names ...string) {
 		} else {
 			s.fail[m] = err
 		}
+	}
+}
+
+// SQLContext makes a call under an ended context fail with the context's error and change nothing,
+// as on the SQL stores (and memory.Store). Until then the store ignores a request's end, as the
+// broker tests written before #693 assume.
+func (s *Store) SQLContext() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sqlContext = true
+}
+
+// AfterCall runs f with the call's context each time the named method returns from the store,
+// before its caller sees the result (not when Fail or Down fails it first): a test ends a request
+// there, between the call that detects a misuse and the revocation that follows, or checks the
+// context a call was given. A name that is not a store.Store method panics.
+func (s *Store) AfterCall(name string, f func(context.Context)) {
+	if !methods[name] {
+		panic("memstore: AfterCall: " + name + " is not a store.Store method")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.after[name] = f
+}
+
+// inner is the context a call passes to memory.Store: ctx under SQLContext, else ctx with its
+// ending removed.
+func (s *Store) inner(ctx context.Context) context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sqlContext {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+// ran runs the AfterCall hook of method, if any, with the call's context.
+func (s *Store) ran(method string, ctx context.Context) {
+	s.mu.Lock()
+	f := s.after[method]
+	s.mu.Unlock()
+	if f != nil {
+		f(ctx)
 	}
 }
 
@@ -94,7 +141,8 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 	if err := s.err("Collect"); err != nil {
 		return err
 	}
-	return s.Store.Collect(ctx, now)
+	defer s.ran("Collect", ctx)
+	return s.Store.Collect(s.inner(ctx), now)
 }
 
 func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
@@ -107,7 +155,8 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 	if hook != nil {
 		hook(&g)
 	}
-	got, err := s.Store.CreateGrant(ctx, g)
+	defer s.ran("CreateGrant", ctx)
+	got, err := s.Store.CreateGrant(s.inner(ctx), g)
 	if err == nil {
 		s.mu.Lock()
 		s.grantIDs = append(s.grantIDs, g.ID)
@@ -120,137 +169,152 @@ func (s *Store) Grant(ctx context.Context, id string) (store.Grant, error) {
 	if err := s.err("Grant"); err != nil {
 		return store.Grant{}, err
 	}
-	return s.Store.Grant(ctx, id)
+	defer s.ran("Grant", ctx)
+	return s.Store.Grant(s.inner(ctx), id)
 }
 
 func (s *Store) RevokeGrant(ctx context.Context, id string, at time.Time) error {
 	if err := s.err("RevokeGrant"); err != nil {
 		return err
 	}
-	return s.Store.RevokeGrant(ctx, id, at)
+	defer s.ran("RevokeGrant", ctx)
+	return s.Store.RevokeGrant(s.inner(ctx), id, at)
 }
 
 func (s *Store) UpdateGrant(ctx context.Context, id string, expiresAt time.Time) error {
 	if err := s.err("UpdateGrant"); err != nil {
 		return err
 	}
-	return s.Store.UpdateGrant(ctx, id, expiresAt)
+	defer s.ran("UpdateGrant", ctx)
+	return s.Store.UpdateGrant(s.inner(ctx), id, expiresAt)
 }
 
-// SetIdPTokens also fails on a cancelled context, as the SQL store does.
 func (s *Store) SetIdPTokens(ctx context.Context, id string, sealed []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	if err := s.err("SetIdPTokens"); err != nil {
 		return err
 	}
-	return s.Store.SetIdPTokens(ctx, id, sealed)
+	defer s.ran("SetIdPTokens", ctx)
+	return s.Store.SetIdPTokens(s.inner(ctx), id, sealed)
 }
 
 func (s *Store) RevokeSubject(ctx context.Context, subject string, before, at time.Time) error {
 	if err := s.err("RevokeSubject"); err != nil {
 		return err
 	}
-	return s.Store.RevokeSubject(ctx, subject, before, at)
+	defer s.ran("RevokeSubject", ctx)
+	return s.Store.RevokeSubject(s.inner(ctx), subject, before, at)
 }
 
 func (s *Store) RevokeAll(ctx context.Context, before, at time.Time) error {
 	if err := s.err("RevokeAll"); err != nil {
 		return err
 	}
-	return s.Store.RevokeAll(ctx, before, at)
+	defer s.ran("RevokeAll", ctx)
+	return s.Store.RevokeAll(s.inner(ctx), before, at)
 }
 
 func (s *Store) PutCode(ctx context.Context, c store.PendingCode) error {
 	if err := s.err("PutCode"); err != nil {
 		return err
 	}
-	return s.Store.PutCode(ctx, c)
+	defer s.ran("PutCode", ctx)
+	return s.Store.PutCode(s.inner(ctx), c)
 }
 
 func (s *Store) ConsumeCode(ctx context.Context, grantID string, now time.Time) (store.PendingCode, error) {
 	if err := s.err("ConsumeCode"); err != nil {
 		return store.PendingCode{}, err
 	}
-	return s.Store.ConsumeCode(ctx, grantID, now)
+	defer s.ran("ConsumeCode", ctx)
+	return s.Store.ConsumeCode(s.inner(ctx), grantID, now)
 }
 
 func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
 	if err := s.err("SpendLogin"); err != nil {
 		return err
 	}
-	return s.Store.SpendLogin(ctx, hash, now, expiresAt)
+	defer s.ran("SpendLogin", ctx)
+	return s.Store.SpendLogin(s.inner(ctx), hash, now, expiresAt)
 }
 
 func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
 	if err := s.err("SpendAssertion"); err != nil {
 		return err
 	}
-	return s.Store.SpendAssertion(ctx, hash, now, expiresAt)
+	defer s.ran("SpendAssertion", ctx)
+	return s.Store.SpendAssertion(s.inner(ctx), hash, now, expiresAt)
 }
 
 func (s *Store) PutRefreshToken(ctx context.Context, t store.RefreshToken) error {
 	if err := s.err("PutRefreshToken"); err != nil {
 		return err
 	}
-	return s.Store.PutRefreshToken(ctx, t)
+	defer s.ran("PutRefreshToken", ctx)
+	return s.Store.PutRefreshToken(s.inner(ctx), t)
 }
 
 func (s *Store) RefreshToken(ctx context.Context, hash [sha256.Size]byte, now time.Time) (store.RefreshToken, error) {
 	if err := s.err("RefreshToken"); err != nil {
 		return store.RefreshToken{}, err
 	}
-	return s.Store.RefreshToken(ctx, hash, now)
+	defer s.ran("RefreshToken", ctx)
+	return s.Store.RefreshToken(s.inner(ctx), hash, now)
 }
 
 func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) error {
 	if err := s.err("RotateRefreshToken"); err != nil {
 		return err
 	}
-	return s.Store.RotateRefreshToken(ctx, r)
+	defer s.ran("RotateRefreshToken", ctx)
+	return s.Store.RotateRefreshToken(s.inner(ctx), r)
 }
 
 func (s *Store) Revocations(ctx context.Context) ([]store.Revocation, error) {
 	if err := s.err("Revocations"); err != nil {
 		return nil, err
 	}
-	return s.Store.Revocations(ctx)
+	defer s.ran("Revocations", ctx)
+	return s.Store.Revocations(s.inner(ctx))
 }
 
 func (s *Store) CreateClient(ctx context.Context, c store.Client, maxClients int) error {
 	if err := s.err("CreateClient"); err != nil {
 		return err
 	}
-	return s.Store.CreateClient(ctx, c, maxClients)
+	defer s.ran("CreateClient", ctx)
+	return s.Store.CreateClient(s.inner(ctx), c, maxClients)
 }
 
 func (s *Store) Client(ctx context.Context, id string) (store.Client, error) {
 	if err := s.err("Client"); err != nil {
 		return store.Client{}, err
 	}
-	return s.Store.Client(ctx, id)
+	defer s.ran("Client", ctx)
+	return s.Store.Client(s.inner(ctx), id)
 }
 
 func (s *Store) UseClient(ctx context.Context, id string, now, expires time.Time, minExtension time.Duration) error {
 	if err := s.err("UseClient"); err != nil {
 		return err
 	}
-	return s.Store.UseClient(ctx, id, now, expires, minExtension)
+	defer s.ran("UseClient", ctx)
+	return s.Store.UseClient(s.inner(ctx), id, now, expires, minExtension)
 }
 
 func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
 	if err := s.err("RememberConsent"); err != nil {
 		return err
 	}
-	return s.Store.RememberConsent(ctx, c)
+	defer s.ran("RememberConsent", ctx)
+	return s.Store.RememberConsent(s.inner(ctx), c)
 }
 
 func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
 	if err := s.err("Consent"); err != nil {
 		return store.Consent{}, err
 	}
-	return s.Store.Consent(ctx, k)
+	defer s.ran("Consent", ctx)
+	return s.Store.Consent(s.inner(ctx), k)
 }
 
 var _ store.Store = (*Store)(nil)

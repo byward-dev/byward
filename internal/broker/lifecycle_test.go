@@ -461,20 +461,39 @@ func (e *env) callbackFinished(t *testing.T, end lifecycle.Ended, w *httptest.Re
 
 // A refused client is refused whether or not its request has ended: only a lookup that waited
 // (ErrUnavailable) is answered by how its request ended, so each refusal that ends a grant
-// (refusals: the denylist, a refused document) still revokes the grant behind the presented refresh
-// token (draft -03 §6.1; #338; #672).
+// (refusals: the denylist, a refused document) still revokes the grant behind what it presents: a
+// code or a refresh token at /token, or a token at /revoke (draft -03 §6.1; #338; #672). The store
+// fails a call under the ended context, as a SQL store does, so the revocation and the lookup it
+// needs must run detached (#693).
 func TestARefusedClientWhoseRequestEndedStillLosesItsGrant(t *testing.T) {
+	// Each surface readies what the client presents and returns its path and form.
+	surfaces := map[string]func(t *testing.T, c refusable) (string, url.Values){
+		"a code": func(t *testing.T, c refusable) (string, url.Values) {
+			return "/token", redeemForm(c.signIn(t), url.Values{"client_id": {c.d.ClientID}, "redirect_uri": {c.d.Redirect}})
+		},
+		"a refresh token": func(t *testing.T, c refusable) (string, url.Values) {
+			return "/token", refreshForm(c.tokens(t, c.signIn(t))["refresh_token"].(string), c.d.ClientID)
+		},
+		"a token at /revoke": func(t *testing.T, c refusable) (string, url.Values) {
+			return "/revoke", url.Values{"token": {c.tokens(t, c.signIn(t))["refresh_token"].(string)}, "client_id": {c.d.ClientID}}
+		},
+	}
 	for name, refusal := range refusals {
-		for _, end := range lifecycle.ContextEndings {
-			t.Run(name+"/"+end.Ending.String(), func(t *testing.T) {
-				c := refusal(t)
-				tokens := c.tokens(t, c.signIn(t))
-				grantID := c.onlyGrant(t)
-				c.refuse()
-				f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {c.d.ClientID}}
-				c.e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
-				c.wantOneRevocation(t, grantID)
-			})
+		for surface, ready := range surfaces {
+			for _, end := range lifecycle.ContextEndings {
+				t.Run(name+"/"+surface+"/"+end.Ending.String(), func(t *testing.T) {
+					c := refusal(t)
+					path, f := ready(t, c)
+					grantID := c.onlyGrant(t)
+					c.refuse()
+					c.e.st.SQLContext()
+					for _, m := range []string{"Grant", "RefreshToken", "RevokeGrant"} { // the revocation and the lookup before it
+						c.e.st.AfterCall(m, func(call context.Context) { wantBounded(t, call) })
+					}
+					c.e.serveIn(endedCtx(end), formRequest(path, strings.NewReader(f.Encode())))
+					c.wantOneRevocation(t, grantID)
+				})
+			}
 		}
 	}
 }

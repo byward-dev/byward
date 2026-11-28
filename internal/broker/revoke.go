@@ -40,16 +40,25 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedRevocation)
+	// Detached: a revocation whose form was read finishes whatever the request's end, so a client
+	// that closes as it signs out, or a shutdown, cannot leave the grant live in the store. The
+	// client's lookup is part of it: a DCR client's is a store read (#693).
+	ctx, cancel := detached(r.Context())
+	defer cancel()
+	client, ok := b.authenticateClient(ctx, w, r, now, b.revokeForRefusedRevocation)
 	if !ok {
 		return
 	}
+	// A fresh bound for the token's lookup and its revocation: a slow client lookup (a CIMD fetch, a
+	// jwks_uri) must not spend the revocation's time.
+	cancel()
+	ctx, cancel = detached(r.Context())
+	defer cancel()
 	tok := r.PostForm.Get("token")
 	if tok == "" {
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_request", "token is required"})
 		return
 	}
-	ctx := r.Context()
 	grantID, owner, err := b.tokenGrant(ctx, tok, now)
 	if err != nil {
 		b.unavailable(w, r, "looking up a token to revoke failed", err)
@@ -66,6 +75,9 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 		b.revoked(r, client.ID(), grantID, "the client revoked a token (RFC 7009)")
 	}
+	if shutdown.AnswerIfEnded(w, r) { // the revocation is done; an ended request is answered by how it ended
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 }
@@ -75,7 +87,9 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 // as the client asked and as a refresh by the same client would end it. Only the token's own
 // client's grant is revoked; a store failure leaves it to the next request.
 func (b *Broker) revokeForRefusedRevocation(r *http.Request, clientID string, now time.Time, why string) {
-	grantID, owner, err := b.tokenGrant(r.Context(), r.PostForm.Get("token"), now)
+	ctx, cancel := detached(r.Context()) // the revocation's lookup finishes whatever the request's end (#693)
+	defer cancel()
+	grantID, owner, err := b.tokenGrant(ctx, r.PostForm.Get("token"), now)
 	if err != nil || grantID == "" || owner != clientID {
 		return
 	}

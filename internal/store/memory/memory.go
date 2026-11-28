@@ -57,7 +57,10 @@ func New() *Store {
 }
 
 // SpendLogin implements store.Logins.
-func (s *Store) SpendLogin(_ context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	if err := store.CheckSpend(now, expiresAt); err != nil {
 		return err
 	}
@@ -71,7 +74,10 @@ func (s *Store) SpendLogin(_ context.Context, hash [sha256.Size]byte, now, expir
 }
 
 // SpendAssertion implements store.ClientAssertions.
-func (s *Store) SpendAssertion(_ context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	if err := store.CheckSpend(now, expiresAt); err != nil {
 		return err
 	}
@@ -85,7 +91,10 @@ func (s *Store) SpendAssertion(_ context.Context, hash [sha256.Size]byte, now, e
 }
 
 // CreateGrant implements store.Grants.
-func (s *Store) CreateGrant(_ context.Context, g store.Grant) (store.Grant, error) {
+func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return store.Grant{}, err
+	}
 	if err := g.CheckNew(); err != nil {
 		return store.Grant{}, err
 	}
@@ -106,7 +115,10 @@ func (s *Store) CreateGrant(_ context.Context, g store.Grant) (store.Grant, erro
 }
 
 // Grant implements store.Grants.
-func (s *Store) Grant(_ context.Context, id string) (store.Grant, error) {
+func (s *Store) Grant(ctx context.Context, id string) (store.Grant, error) {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return store.Grant{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g, ok := s.grants[id]
@@ -117,7 +129,10 @@ func (s *Store) Grant(_ context.Context, id string) (store.Grant, error) {
 }
 
 // RevokeGrant implements store.Grants.
-func (s *Store) RevokeGrant(_ context.Context, id string, at time.Time) error {
+func (s *Store) RevokeGrant(ctx context.Context, id string, at time.Time) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g, ok := s.grants[id]
@@ -129,7 +144,10 @@ func (s *Store) RevokeGrant(_ context.Context, id string, at time.Time) error {
 }
 
 // UpdateGrant implements store.Grants.
-func (s *Store) UpdateGrant(_ context.Context, id string, expiresAt time.Time) error {
+func (s *Store) UpdateGrant(ctx context.Context, id string, expiresAt time.Time) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g, ok := s.grants[id]
@@ -145,7 +163,10 @@ func (s *Store) UpdateGrant(_ context.Context, id string, expiresAt time.Time) e
 }
 
 // SetIdPTokens implements store.Grants.
-func (s *Store) SetIdPTokens(_ context.Context, id string, sealed []byte) error {
+func (s *Store) SetIdPTokens(ctx context.Context, id string, sealed []byte) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	if len(sealed) == 0 {
 		return store.ErrInvalid
 	}
@@ -161,7 +182,10 @@ func (s *Store) SetIdPTokens(_ context.Context, id string, sealed []byte) error 
 }
 
 // RevokeSubject implements store.Grants.
-func (s *Store) RevokeSubject(_ context.Context, subject string, before, at time.Time) error {
+func (s *Store) RevokeSubject(ctx context.Context, subject string, before, at time.Time) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	if subject == "" {
 		return store.ErrInvalid
 	}
@@ -182,7 +206,10 @@ func (s *Store) RevokeSubject(_ context.Context, subject string, before, at time
 }
 
 // RevokeAll implements store.Grants.
-func (s *Store) RevokeAll(_ context.Context, before, at time.Time) error {
+func (s *Store) RevokeAll(ctx context.Context, before, at time.Time) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, g := range s.grants {
@@ -200,7 +227,10 @@ func (s *Store) RevokeAll(_ context.Context, before, at time.Time) error {
 }
 
 // PutCode implements store.Codes.
-func (s *Store) PutCode(_ context.Context, c store.PendingCode) error {
+func (s *Store) PutCode(ctx context.Context, c store.PendingCode) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.grants[c.GrantID]; !ok {
@@ -214,7 +244,10 @@ func (s *Store) PutCode(_ context.Context, c store.PendingCode) error {
 }
 
 // ConsumeCode implements store.Codes.
-func (s *Store) ConsumeCode(_ context.Context, grantID string, now time.Time) (store.PendingCode, error) {
+func (s *Store) ConsumeCode(ctx context.Context, grantID string, now time.Time) (store.PendingCode, error) {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return store.PendingCode{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.codes[grantID]
@@ -229,7 +262,10 @@ func (s *Store) ConsumeCode(_ context.Context, grantID string, now time.Time) (s
 }
 
 // PutRefreshToken implements store.RefreshTokens.
-func (s *Store) PutRefreshToken(_ context.Context, t store.RefreshToken) error {
+func (s *Store) PutRefreshToken(ctx context.Context, t store.RefreshToken) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.grants[t.GrantID]; !ok {
@@ -244,7 +280,10 @@ func (s *Store) PutRefreshToken(_ context.Context, t store.RefreshToken) error {
 }
 
 // RefreshToken implements store.RefreshTokens.
-func (s *Store) RefreshToken(_ context.Context, hash [sha256.Size]byte, now time.Time) (store.RefreshToken, error) {
+func (s *Store) RefreshToken(ctx context.Context, hash [sha256.Size]byte, now time.Time) (store.RefreshToken, error) {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return store.RefreshToken{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.tokens[hash]
@@ -255,7 +294,10 @@ func (s *Store) RefreshToken(_ context.Context, hash [sha256.Size]byte, now time
 }
 
 // RotateRefreshToken implements store.RefreshTokens.
-func (s *Store) RotateRefreshToken(_ context.Context, r store.RotateRequest) error {
+func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, ok := s.tokens[r.Old]
@@ -294,7 +336,10 @@ func (s *Store) RotateRefreshToken(_ context.Context, r store.RotateRequest) err
 }
 
 // Revocations implements store.Revocations.
-func (s *Store) Revocations(context.Context) ([]store.Revocation, error) {
+func (s *Store) Revocations(ctx context.Context) ([]store.Revocation, error) {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := slices.Clone(s.revs)
@@ -303,7 +348,10 @@ func (s *Store) Revocations(context.Context) ([]store.Revocation, error) {
 }
 
 // Collect implements store.Collector.
-func (s *Store) Collect(_ context.Context, now time.Time) error {
+func (s *Store) Collect(ctx context.Context, now time.Time) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, g := range s.grants {
@@ -345,7 +393,10 @@ func (s *Store) Collect(_ context.Context, now time.Time) error {
 }
 
 // CreateClient implements store.Clients.
-func (s *Store) CreateClient(_ context.Context, c store.Client, max int) error {
+func (s *Store) CreateClient(ctx context.Context, c store.Client, max int) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	if err := c.CheckNew(); err != nil {
 		return err
 	}
@@ -371,7 +422,10 @@ func (s *Store) CreateClient(_ context.Context, c store.Client, max int) error {
 }
 
 // Client implements store.Clients.
-func (s *Store) Client(_ context.Context, id string) (store.Client, error) {
+func (s *Store) Client(ctx context.Context, id string) (store.Client, error) {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return store.Client{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.clients[id]
@@ -383,7 +437,10 @@ func (s *Store) Client(_ context.Context, id string) (store.Client, error) {
 }
 
 // UseClient implements store.Clients.
-func (s *Store) UseClient(_ context.Context, id string, now, expires time.Time, minExtension time.Duration) error {
+func (s *Store) UseClient(ctx context.Context, id string, now, expires time.Time, minExtension time.Duration) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.clients[id]
@@ -401,7 +458,10 @@ func (s *Store) UseClient(_ context.Context, id string, now, expires time.Time, 
 }
 
 // RememberConsent implements store.Consents.
-func (s *Store) RememberConsent(_ context.Context, c store.Consent) error {
+func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return err
+	}
 	if err := c.CheckNew(); err != nil {
 		return err
 	}
@@ -414,7 +474,10 @@ func (s *Store) RememberConsent(_ context.Context, c store.Consent) error {
 }
 
 // Consent implements store.Consents.
-func (s *Store) Consent(_ context.Context, k store.ConsentKey) (store.Consent, error) {
+func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
+	if err := ctx.Err(); err != nil { // as a SQL store, which takes no connection for an ended context
+		return store.Consent{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.consents[k]
