@@ -459,10 +459,12 @@ func (b *Broker) unavailable(w http.ResponseWriter, r *http.Request, what string
 	b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy's store is unavailable; try again"})
 }
 
-// DetachedTimeout bounds a store call that finishes whatever its request's end (detached). A request
-// may make two in a row (a refused client's lookup, then its revocation), so twice it is inside the
-// server's shutdown grace, and a shutdown waits for them while the store is still open (ADR-0018
-// §9; internal/server pins it).
+// DetachedTimeout bounds a store call that finishes whatever its request's end (detached). Each call
+// of detached starts its own bound: a /revoke by a client refused at lookup makes three in a row (the
+// client's lookup, then revokeForRefusedRevocation's token lookup, then revoke's write), an accepted
+// one two (the client's lookup and authentication, then the token's lookup and revocation). So three
+// times it is inside the server's shutdown grace, and a shutdown waits for them while the store is
+// still open (ADR-0018 §9; internal/server pins it).
 const DetachedTimeout = 5 * time.Second
 
 // detached is ctx without its end, bounded by DetachedTimeout, for a store call that must finish

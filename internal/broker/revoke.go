@@ -49,6 +49,11 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// A fresh bound for the token's lookup and its revocation: a slow client lookup (a CIMD fetch, a
+	// jwks_uri) must not spend the revocation's time.
+	cancel()
+	ctx, cancel = detached(r.Context())
+	defer cancel()
 	tok := r.PostForm.Get("token")
 	if tok == "" {
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_request", "token is required"})
