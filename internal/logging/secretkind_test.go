@@ -248,6 +248,13 @@ func TestWhatConfigRefusesAsItShowsAValueIsRedacted(t *testing.T) {
 			t.Errorf("%q: refused as shown (%q) but redacted %v", v, ShownSecretKind(AsGiven(v)), LooksSecret(v))
 		}
 	}
+	// A JSON line that is not printable is read as given too: quoted, its \/ is no URL, and as a
+	// list the document is cut apart.
+	for _, v := range []string{"{\"a\":\t\"postgres:\\/\\/u:" + "pw@h\",\"b\":1}", "{\"a\":\t\"" + fakeToken("ghp_") + "\",\"b\":1}"} {
+		if !LooksSecret(v) {
+			t.Errorf("%q: a JSON line with a secret, read as given, is not redacted", v)
+		}
+	}
 	for _, v := range []string{"postgres://u:pa, " + "ss@h", "postgres://u:pa,x/y," + "ss@h", "postgres://u\n:Q7Q7Q7," + "q x@h"} { // the last only as quoted
 		if ShownListSecretKind(strings.Split(AsGiven(v), ",")) != passwordKind || !LooksSecret(v) { // a list as config shows it
 			t.Errorf("%q: refused as a list but redacted %v", v, LooksSecret(v))

@@ -194,15 +194,17 @@ func TestEveryPrintingSurfaceDecidesEveryKindAsPinned(t *testing.T) {
 // The walk fails, by name, on a command or a flag of init that has no surface, and calls a surface
 // that prints its value "shown": a probe command that echoes its argument is caught both ways.
 func TestTheWalkNamesASurfaceItDoesNotCover(t *testing.T) {
-	probe := map[string]command{"probe": {run: func(_ context.Context, args, _ []string, stdout, _ io.Writer) int {
+	echo := command{run: func(_ context.Context, args, _ []string, stdout, _ io.Writer) int {
 		_, _ = io.WriteString(stdout, strings.Join(args, " "))
 		return exitOK
-	}}}
+	}}
+	probe := map[string]command{"probe": echo, "another-probe": echo} // named in order, whatever the map's
+
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.String("probe-flag", "", "")
 	// A surface of another command, or of another init flag, covers neither (each half of the match).
 	others := []walkSurface{{command: "init", flag: "other"}, {command: "probe-other", flag: "probe-flag"}}
-	if got, want := walkGaps(others, probe, nil, fs), []string{"command probe", "init flag --probe-flag"}; !slices.Equal(got, want) {
+	if got, want := walkGaps(others, probe, nil, fs), []string{"command another-probe", "command probe", "init flag --probe-flag"}; !slices.Equal(got, want) {
 		t.Errorf("walkGaps = %q, want %q", got, want)
 	}
 	var out bytes.Buffer
