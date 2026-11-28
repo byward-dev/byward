@@ -92,7 +92,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		if shutdown.AnswerIfEnded(w, r) {
 			return
 		}
-		e = tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"} // never a status 0
+		e = idpUnavailable // never a status 0
 	}
 	if !ok {
 		if sealed != nil {
@@ -122,6 +122,9 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	b.recordUse(ctx, client, now)
 	b.issue(w, r, client.ID(), g.ID, g.Subject, asserted, idpExpiry, now, g.ExpiresAt, scopes, next)
 }
+
+// idpUnavailable is the answer to a refresh the IdP could not serve for now.
+var idpUnavailable = tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}
 
 // requestEnded is refreshIdP's error for a refresh whose request ended while it waited on the
 // IdP: there is nothing to send but the ending's own answer (shutdown.AnswerIfEnded).
@@ -165,7 +168,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			return nil, assertedClaims{}, time.Time{}, requestEnded, false
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
 			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, idpAttrs(err)...)...)
-			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
+			return nil, assertedClaims{}, time.Time{}, idpUnavailable, false
 		default:
 			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", append([]any{"error", err}, idpAttrs(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, cannotRefresh, false
