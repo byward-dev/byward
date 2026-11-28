@@ -41,8 +41,12 @@ func TestEachFuzzRuleFailsTheColumnThatBreaksIt(t *testing.T) {
 		{"a list check passes a fragment after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com#a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com#a", ""},
 		{"a list check passes a backslash path after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com\\a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com\\a", ""},
 		{"a list check passes a listed host in another letter case", Column{Lists: true, Judge: passes("MCP.example.com", "mcp.example.com")}, bare, []string{"mcp.example.com"}, "MCP.example.com", ""},
-		// A browser writes the Kelvin sign as k (UTS 46), so the form browsers write of it is listed.
-		{"a list check passes a host whose written form is listed", Column{Lists: true, Judge: passes("\u212a.example", "k.example")}, bare, []string{"k.example"}, "\u212a.example", ""},
+		// A non-ASCII host has no written form here (Serialize maps nothing as UTS 46 does): a list
+		// check that folds the Kelvin sign onto a listed k is a finding, as is a denylist that does not
+		// stop a dotted capital I that strings.ToLower, not a browser, folds onto a listed i.
+		{"a list check passes a non-ASCII host whose Go fold is listed", Column{Lists: true, Judge: passes("\u212a.example", "k.example")}, bare, []string{"k.example"}, "\u212a.example",
+			"c passes \"\u212a.example\", which testdata/hostdecisions.allowed lists in no letter case (a widening)"},
+		{"a denylist passes a non-ASCII host whose Go fold it stops", Column{Denies: true, Judge: passes("https://ev\u0130l.example/x")}, inURL, []string{"https://evil.example/x"}, "ev\u0130l.example", ""},
 		{"a list check passes another spelling of a listed address", Column{Lists: true, Judge: passes("127.1:8080", "127.0.0.1:8080")}, bare, []string{"127.0.0.1:8080"}, "127.1:8080", ""},
 		{"a list check passes a path after a listed host", Column{Lists: true, Judge: passes("https://mcp.example.com/a/x")}, inURL, []string{"https://mcp.example.com/x"}, "mcp.example.com/a", ""},
 		{"a denylist stops a listed host", Column{Denies: true, Judge: passes()}, bare, []string{"evil.example"}, "EVIL.example", ""},

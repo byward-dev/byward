@@ -95,11 +95,24 @@ func (z fuzzer) writtenForm(at [2]string, h string) (string, bool) {
 }
 
 // hasWrittenForm reports whether h, split into host, has a form browsers write to compare: it is
-// valid UTF-8 (Serialize writes U+FFFD for a byte that is not), with no white space at either end
-// (a list parser trims it, so the form would not be h's), and, in a URL, an IPv6 address is in
-// brackets (without them it is no host a browser reads).
+// ASCII, with no white space at either end (a list parser trims it, so the form would not be h's),
+// and, in a URL, an IPv6 address is in brackets (without them it is no host a browser reads). A
+// non-ASCII h has none: Serialize lower-cases with strings.ToLower and maps nothing as UTS 46 does,
+// so its form is no browser's (it folds İ to i where a browser writes i and U+0307, and leaves
+// bücher.example as it is where a browser writes xn--bcher-kva.example), and a byte that is not
+// UTF-8 becomes U+FFFD.
 func hasWrittenForm(h, host string, inURL bool) bool {
-	return utf8.ValidString(h) && strings.TrimSpace(h) == h && (!inURL || strings.HasPrefix(h, "[") || !strings.Contains(host, ":"))
+	return isASCII(h) && strings.TrimSpace(h) == h && (!inURL || strings.HasPrefix(h, "[") || !strings.Contains(host, ":"))
+}
+
+// isASCII reports whether s holds only ASCII bytes.
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // bracketed is a serialized host in brackets when it holds a ":" without them: Serialize brackets

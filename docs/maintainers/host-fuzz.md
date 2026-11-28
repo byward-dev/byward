@@ -25,7 +25,7 @@ with their scheme and path):
 |---|---|---|
 | No widening | the checks against a fixed list: the public Host, the Origin and consent Origin, the CIMD allowed and trusted hosts | the check passes an input that `hostdecisions.allowed` lists in no ASCII letter case |
 | No widening, denylist | the client denylist's client ID and redirect | the check no longer stops an input that `hostdecisions.allowed` lists, in some ASCII letter case, as stopped |
-| Round trip | every check but a denylist | the check passes an input and refuses it with its host as browsers write it (`host.Serialize`) |
+| Round trip | every check but a denylist | the check passes an ASCII input and refuses it with its host as browsers write it (`host.Serialize`). A non-ASCII host has no such form here, because `Serialize` maps nothing as UTS 46 does |
 | No panic | every check | the check panics |
 
 A check that takes an open set of hosts has no widening rule. A list of inputs cannot hold that set,
