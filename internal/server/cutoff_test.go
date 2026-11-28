@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,8 +22,8 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/metrics"
-	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
@@ -116,12 +115,9 @@ func TestAStreamCutOffAfterItsHeadersRecordsTheStatusItSentAndWhyThroughTheWhole
 			logs := &logsink.Buffer{}
 			log := logging.New(logs, "json")
 			m := metrics.New()
-			srv := httptest.NewUnstartedServer(Handler(cfg, log, httpUpstream(cfg, log), acceptGood{}, nil, nil,
-				Observability{Audit: audit.New(log, nil, time.Now), Metrics: m}))
 			// As serve does, so a request can tell the proxy shutting down from its client going away.
-			base, shutDown := shutdown.WithCancel(context.Background())
-			t.Cleanup(shutDown)
-			srv.Config.BaseContext = func(net.Listener) context.Context { return base }
+			srv, shutDown := lifecycle.NewShutdownServer(t, Handler(cfg, log, httpUpstream(cfg, log), acceptGood{}, nil, nil,
+				Observability{Audit: audit.New(log, nil, time.Now), Metrics: m}))
 			var mu sync.Mutex
 			var states []http.ConnState
 			srv.Config.ConnState = func(_ net.Conn, s http.ConnState) { mu.Lock(); states = append(states, s); mu.Unlock() }

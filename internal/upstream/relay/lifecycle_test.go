@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
@@ -16,7 +15,6 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/logging"
-	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/testutil/lifecycle"
@@ -139,6 +137,16 @@ func newRelayRig(t *testing.T, state lifecycle.State, timeout time.Duration) *re
 				_, _ = io.WriteString(w, "ok")
 			}
 		case <-r.abort:
+			if state == lifecycle.BodyInFlight {
+				// The connection breaks off under the body still being read, and the read ends before
+				// the handler does: a handler must not end while its body is read (http.Handler).
+				// Panicking with the read still going, Go's server (1.27.4 server.go:1972) at times
+				// waited for ever in abortPendingRead on a background read the body's end had started,
+				// and never closed the connection, so the relay never answered (about 1 run in 400
+				// under -race -cpu 2,8; none in 8,000 this way).
+				up.CloseClientConnections()
+				<-bodyDone
+			}
 			if state == lifecycle.UpgradeRequested { // the upstream switches protocols anyway
 				w.Header().Set("Connection", "Upgrade")
 				w.Header().Set("Upgrade", "websocket")
@@ -160,11 +168,8 @@ func newRelayRig(t *testing.T, state lifecycle.State, timeout time.Duration) *re
 		opts = append(opts, WithResponseHeaderTimeout(timeout))
 	}
 	log := logging.New(r.logs, "json")
-	r.srv = httptest.NewUnstartedServer(logging.Middleware(log, New(log, u, opts...)))
-	base, shutDown := shutdown.WithCancel(t.Context())
-	t.Cleanup(shutDown)
-	r.shutDown = shutDown
-	r.srv.Config.BaseContext = func(net.Listener) context.Context { return base }
+	// Wrapped as the server wraps its handler, so a shutdown ends a body still being read (#697).
+	r.srv, r.shutDown = lifecycle.NewShutdownServer(t, logging.Middleware(log, New(log, u, opts...)))
 	r.srv.Start()
 	t.Cleanup(r.srv.Close)
 	// Cleanups run last first: releasing a held upstream before the proxy's Close lets the relay's
@@ -258,8 +263,10 @@ func runRelayCell(t *testing.T, state lifecycle.State, end lifecycle.Ending, wan
 	case lifecycle.Shutdown:
 		r.shutDown()
 	}
-	if rest != nil && end != lifecycle.Completes {
-		rest.Stop() // the client stops sending: it gave up, or the proxy has answered
+	// The client stops sending: it gave up. At a shutdown it is still there, and goes on holding
+	// its body: the server's read deadline (shutdown.CutsBodyReads) ends the relay's read (#697).
+	if rest != nil && end != lifecycle.Completes && end != lifecycle.Shutdown {
+		rest.Stop()
 	}
 	var res clientResult
 	select {
@@ -364,7 +371,7 @@ func TestTheRelayLifecycleMatrix(t *testing.T) {
 		shutting    = "the proxy is shutting down"
 		timedOut    = "upstream did not answer in time"
 	)
-	afterBody := "the header timeout starts once the request is written (timeout.go), so none applies while its body is in flight; the server's ReadTimeout bounds a stalled upload"
+	afterBody := "the header timeout starts once the request is written (timeout.go), so none applies while its body is in flight; the server's ReadTimeout bounds a stalled upload, and a shutdown ends it (shutdown.CutsBodyReads)"
 	noStreamBound := "the header timeout ends with the response's headers; nothing bounds a streamed body, by design (TestHeaderTimeoutDoesNotLimitAStreamedBody)"
 	stripped := "the relay strips the client's upgrade before the request leaves (relay.go Rewrite), so it is an ordinary request, whose endings are the other columns'"
 	at := func(end lifecycle.Ending, state lifecycle.State) lifecycle.Cell {

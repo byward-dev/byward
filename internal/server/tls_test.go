@@ -71,30 +71,71 @@ func (l *tlsLog) waitFor(t *testing.T, re *regexp.Regexp) string {
 	}
 }
 
-// runPublic runs s, logging to logs, until the test ends, and returns the public listener's
-// address.
-func runPublic(t *testing.T, s *Servers, logs *tlsLog) string {
+// runningProxy is the proxy startRun started: its servers, address and log, the cancel that shuts
+// it down, and Run's result once it has.
+type runningProxy struct {
+	s      *Servers
+	addr   string
+	logs   *tlsLog
+	cancel context.CancelFunc
+	done   <-chan error
+}
+
+// startRun runs s through Run, logging to logs, and waits until it listens. The test's end, or
+// cancel, shuts it down; the test's end waits for Run to return, for up to ShutdownTimeout.
+func startRun(t *testing.T, s *Servers, logs *tlsLog) runningProxy {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- Run(ctx, s, logging.New(logs, "json")) }()
+	done := make(chan error, 1)   // Run's result, for the caller (runningProxy.done)
+	waited := make(chan error, 1) // the same, for the cleanup, which only waits for it
+	go func() { err := Run(ctx, s, logging.New(logs, "json")); done <- err; waited <- err }()
 	t.Cleanup(func() {
 		cancel()
-		if err := <-done; err != nil {
-			t.Error(err)
+		select {
+		case err := <-waited:
+			_ = err // the caller's to check, through done
+		case <-time.After(ShutdownTimeout + 5*time.Second):
+			t.Error("Run did not return after the test ended")
 		}
 	})
 	for !listenLine.MatchString(logs.String()) {
 		select {
 		case <-logs.wrote:
 		case err := <-done:
-			done <- err // for the cleanup, which waits for Run
 			t.Fatalf("Run returned before listening: %v", err)
 		case <-time.After(5 * time.Second):
 			t.Fatal("Run did not log its listening address within 5s")
 		}
 	}
-	return listenLine.FindStringSubmatch(logs.String())[1]
+	return runningProxy{s, listenLine.FindStringSubmatch(logs.String())[1], logs, cancel, done}
+}
+
+// finished waits for Run to return after cancel, failing t on its error, and returns the log.
+func (p runningProxy) finished(t *testing.T) string {
+	t.Helper()
+	select {
+	case err := <-p.done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(ShutdownTimeout + 5*time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	return p.logs.String()
+}
+
+// runPublic runs s, logging to logs, until the test ends, and returns the public listener's
+// address; Run must return no error.
+func runPublic(t *testing.T, s *Servers, logs *tlsLog) string {
+	t.Helper()
+	p := startRun(t, s, logs)
+	t.Cleanup(func() { // runs before startRun's, which waits for Run
+		p.cancel()
+		if err := <-p.done; err != nil {
+			t.Error(err)
+		}
+	})
+	return p.addr
 }
 
 // tlsModes are the two modes TLS works in: authenticated, and without authentication on the

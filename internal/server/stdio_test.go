@@ -379,16 +379,6 @@ func TestShutdownFailsReadinessAndEndsAnOpenListenWithItsCompletionResultBeforeI
 	}
 }
 
-// runningProxy is the proxy runStdio started: its servers, address and log, the cancel that shuts
-// it down, and Run's result once it has.
-type runningProxy struct {
-	s      *Servers
-	addr   string
-	logs   *listenWatcher
-	cancel context.CancelFunc
-	done   <-chan error
-}
-
 // runStdio starts the proxy through New and Run, without authentication and on a free port, in
 // front of the fake stdio upstream run with args, and waits until it listens. internalListen is
 // BYWARD_INTERNAL_LISTEN ("" for none). The test's end cancels it.
@@ -403,29 +393,17 @@ func runStdio(t *testing.T, internalListen string, args ...string) runningProxy 
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs := &listenWatcher{listening: make(chan struct{})}
-	log := logging.New(logs, "json")
-	s, err := New(cfg, log)
+	logs := newTLSLog()
+	s, err := New(cfg, logging.New(logs, "json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	done := make(chan error, 1)
-	go func() { done <- Run(ctx, s, log) }()
-	select {
-	case <-logs.listening:
-	case err := <-done:
-		t.Fatalf("Run returned before listening: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not log its listening address within 5s")
-	}
-	return runningProxy{s, listenLine.FindStringSubmatch(logs.String())[1], logs, cancel, done}
+	return startRun(t, s, logs)
 }
 
 func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 	p := runStdio(t, internalListen, "-modern")
-	s, cancel, done := p.s, p.cancel, p.done
+	s, cancel := p.s, p.cancel
 	body := `{"jsonrpc":"2.0","id":"L","method":"subscriptions/listen","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",` +
 		`"io.modelcontextprotocol/clientCapabilities":{}},"notifications":{"toolsListChanged":true}}}`
 	r, _ := http.NewRequest(http.MethodPost, "http://"+p.addr+"/mcp", strings.NewReader(body))
@@ -475,14 +453,7 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 	if code, body := getBody(t, probes, "x", "/readyz"); code != http.StatusServiceUnavailable || !strings.Contains(body, `"draining":"fail"`) {
 		t.Fatalf("/readyz is %d %s once shutdown has begun, want 503 with draining failing", code, body)
 	}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not return after cancel")
-	}
+	p.finished(t)
 	var listens []map[string]any
 	for _, l := range requestLines(t, p.logs.String()) {
 		if l["mcp_method"] == "subscriptions/listen" {
@@ -503,7 +474,7 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 // logged as a failure of the upstream process.
 func TestShutdownAnswersAStdioRequestStillWaitingForItsUpstreamThroughEveryMiddleware(t *testing.T) {
 	p := runStdio(t, "", "-mcp", "-init=hold")
-	logs, cancel, done := p.logs, p.cancel, p.done
+	logs, cancel := p.logs, p.cancel
 	body := `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`
 	r, _ := http.NewRequest(http.MethodPost, "http://"+p.addr+"/mcp", strings.NewReader(body))
 	r.Host = "127.0.0.1:8080"
@@ -542,14 +513,7 @@ func TestShutdownAnswersAStdioRequestStillWaitingForItsUpstreamThroughEveryMiddl
 	if a.err != nil || a.res.StatusCode != http.StatusServiceUnavailable || a.body != "the proxy is shutting down\n" || !a.res.Close {
 		t.Fatalf("answer %v %q (error %v); want 503 %q on a connection that closes", a.res, a.body, a.err, "the proxy is shutting down\n")
 	}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not return after cancel")
-	}
+	p.finished(t)
 	if got := logs.String(); failureLogged(got) {
 		t.Fatalf("logged %s; want nothing at WARN or above when the proxy's shutdown ends a request", got)
 	}

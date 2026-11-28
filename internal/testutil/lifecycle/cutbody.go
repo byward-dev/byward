@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"errors"
 	"io"
+	"os"
 )
 
 // A CutBody is a request body in flight: its sender has written the first byte and holds the
@@ -36,6 +37,10 @@ func (b *CutBody) Finish() {
 
 // Cut fails the rest of the read, as a connection that resets does.
 func (b *CutBody) Cut() { _ = b.w.CloseWithError(errors.New("connection reset by peer")) }
+
+// Expire fails the rest of the read as a read deadline that has passed does: the server's, set by
+// shutdown.CutsBodyReads at a shutdown.
+func (b *CutBody) Expire() { _ = b.w.CloseWithError(os.ErrDeadlineExceeded) }
 
 // Stop ends the body where it is: its sender gave up.
 func (b *CutBody) Stop() { _ = b.w.Close() }

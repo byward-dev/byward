@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/testutil/lifecycle"
 )
 
@@ -31,8 +32,8 @@ type stdioCell struct {
 	crash  bool     // the cell's process is killed: its exit is logged once, as unexpected, at WARN, and nothing stops it
 }
 
-// stdioRig is one bridge serving through logging.Middleware, as the server does, so a cell sees the
-// request line.
+// stdioRig is one bridge serving through logging.Middleware and shutdown.CutsBodyReads, as the
+// server does, so a cell sees the request line, and a shutdown ends a body still being read.
 type stdioRig struct {
 	*bridgeHarness
 	h         http.Handler
@@ -61,7 +62,7 @@ func newRig(t *testing.T, edit func(*Config), modern bool, flags ...string) *std
 			edit(c)
 		}
 	})
-	return &stdioRig{bridgeHarness: b, h: logging.Middleware(slog.New(b.log), b.bridge), modernEra: modern, bound: guard}
+	return &stdioRig{bridgeHarness: b, h: shutdown.CutsBodyReads(logging.Middleware(slog.New(b.log), b.bridge)), modernEra: modern, bound: guard}
 }
 
 // start serves a request as alice in the background on a writer read while it is written; the
@@ -300,6 +301,9 @@ func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string,
 	t.Helper()
 	b := lifecycle.NewCutBody(body)
 	w, done := r.start(ctx, http.MethodPost, sid, b, header...)
+	w.mu.Lock()
+	w.expire = b.Expire
+	w.mu.Unlock()
 	select {
 	case <-b.Started():
 	case <-done:
@@ -312,14 +316,19 @@ func (r *stdioRig) inFlight(t *testing.T, ctx context.Context, sid, body string,
 	return w, done, b
 }
 
-// bodyCut is a cell whose request ends while the bridge reads its body, and whose MCP client's
-// connection then fails the read, as the server's does.
+// bodyCut is a cell whose request ends while the bridge reads its body. How the read then ends is
+// the ending's own: a client that went away takes its connection, which fails the read; at a
+// shutdown the client is still sending, and shutdown.CutsBodyReads' read deadline fails it (#697),
+// as the server's connection does (server's TestAShutdownEndsAStalledRequestBodyWith503).
 func (r *stdioRig) bodyCut(t *testing.T, end lifecycle.Ending, sid, body string, want stdioCell, header ...string) {
 	t.Helper()
 	ctx, stop := endedAs(end).Start(context.Background())
 	w, done, b := r.inFlight(t, ctx, sid, body, header...)
+	defer b.Stop()
 	r.end(end, stop)
-	b.Cut()
+	if end != lifecycle.Shutdown {
+		b.Cut()
+	}
 	r.check(t, w, done, want)
 }
 
@@ -352,7 +361,7 @@ const (
 	noUpgrade        = "the bridge reads no Upgrade and hijacks nothing, so such a request is an ordinary one, whose endings are the other columns'"
 	noWriteBound     = "the only bound on a started stream is writeTimeout, 30 s of real time through SetWriteDeadline (sse.go), which the fake clock does not reach; a write that fails is the client-gone cell (TestAStdioStreamEndedByItsRequestIsRecordedAsCutOff, keep-alive row), and sse_test.go pins the deadline"
 	noAnswerBound    = "nothing bounds the wait for the process's answer: a held lease stops the idle timer (Process.hold), and a request lease is never evicted; the client leaving or a shutdown ends the wait"
-	noBodyBound      = "the bridge sets no bound on reading or sending a request: Send waits on its request alone, and the server's ReadTimeout bounds a stalled body"
+	noBodyBound      = "the bridge sets no bound on reading or sending a request: Send waits on its request alone; the server's ReadTimeout bounds a stalled body, and a shutdown ends it (shutdown.CutsBodyReads)"
 )
 
 // unreachableColumns marks the columns no stdio transport has.
