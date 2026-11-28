@@ -22,6 +22,8 @@ Find your role below. Each page appears once, under the reader who needs it firs
 | Auth0 | [Sign users in with Auth0](how-to/auth0.md) |
 | Any other OpenID Connect IdP | [Sign users in with an OpenID Connect IdP](how-to/oidc.md) |
 
+Users from more than one IdP: [serve users from several identity providers](how-to/several-identity-providers.md).
+
 Then, for every deployment:
 
 - [Run byward](how-to/run-byward.md): the data directory, the keys, the settings, the container or

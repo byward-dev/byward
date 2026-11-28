@@ -63,3 +63,7 @@ configured issuer", and "client credential": Google accepted the client ID and t
 secret fails, with the setting to fix. (The client credential check is new in v0.3.0; the doctor in
 v0.2.0 does not have it, and a wrong secret shows at the first sign-in as an IdP alert.) Then sign in from an MCP client
 ([oidc.md](oidc.md#5-check-it)).
+
+## See also
+
+- [Serve users from several identity providers](several-identity-providers.md): federate at the IdP, or run one byward per IdP.
