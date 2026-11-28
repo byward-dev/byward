@@ -27,6 +27,10 @@ func TestEachFuzzRuleFailsTheColumnThatBreaksIt(t *testing.T) {
 	}{
 		{"a list check passes an unlisted host", Column{Lists: true, Judge: passes("evil.example")}, bare, []string{"mcp.example.com"}, "evil.example",
 			`c passes "evil.example", which testdata/hostdecisions.allowed lists in no letter case (a widening)`},
+		{"a list check in a URL passes an unlisted host", Column{Lists: true, Judge: passes("https://evil.example/x")}, inURL, []string{"https://mcp.example.com/x"}, "evil.example",
+			`c passes "https://evil.example/x", which testdata/hostdecisions.allowed lists in no letter case (a widening)`},
+		{"a list check passes an unlisted host before a path that names a listed one", Column{Lists: true, Judge: passes("https://evil.example/@mcp.example.com/x")}, inURL, []string{"https://mcp.example.com/x"}, "evil.example/@mcp.example.com",
+			`c passes "https://evil.example/@mcp.example.com/x", which testdata/hostdecisions.allowed lists in no letter case (a widening)`},
 		{"a list check passes a listed host in another letter case", Column{Lists: true, Judge: passes("MCP.example.com", "mcp.example.com")}, bare, []string{"mcp.example.com"}, "MCP.example.com", ""},
 		// A browser writes the Kelvin sign as k (UTS 46), so the form browsers write of it is listed.
 		{"a list check passes a host whose written form is listed", Column{Lists: true, Judge: passes("\u212a.example", "k.example")}, bare, []string{"k.example"}, "\u212a.example", ""},

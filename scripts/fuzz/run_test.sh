@@ -29,7 +29,7 @@ case "\$1 \$2" in
     exit 1 ;;
   empty) printf 'ok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\n'; exit 0 ;;
   esac
-  printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nFuzzHostDecisions\nok  \texample.com/m/c/d\t0.1s\n' |
+  printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nFuzzHostHeader\nFuzzHostDecisions\nok  \texample.com/m/c/d\t0.1s\n' |
     awk -v p="\$3" '!/^Fuzz/ || \$0 ~ p'
   exit 0 ;;
 esac
@@ -59,7 +59,7 @@ exit 0
 EOF
 chmod +x "$tmp/bin/go"
 
-all="^\$ ^FuzzA\$ 1s example.com/m/a;^\$ ^FuzzB\$ 1s example.com/m/a;^\$ ^FuzzC\$ 1s example.com/m/c/d"
+all="^\$ ^FuzzA\$ 1s example.com/m/a;^\$ ^FuzzB\$ 1s example.com/m/a;^\$ ^FuzzC\$ 1s example.com/m/c/d;^\$ ^FuzzHostHeader\$ 1s example.com/m/c/d"
 fuzztime=1s # FUZZTIME for the next rows; empty leaves it unset
 fuzzmatch=  # FUZZMATCH for the next rows; empty leaves it unset
 
@@ -109,23 +109,23 @@ run() {
   fi
 }
 
-run all-pass-and-stale-crashers-are-cleared ok "" "" 0 'fuzz lane: ok \(3 targets, 1s each\)' "" "$all"
-run one-fails-and-the-rest-still-run ok "FuzzB" "" 1 'FAIL: 1 of 3 targets failed' "a/testdata/fuzz/FuzzB/0123abcd" "$all" 'wrote no input'
-run keeps-only-new-inputs-not-tracked-seeds ok "FuzzA FuzzC" "" 1 'FAIL: 2 of 3 targets failed' \
+run all-pass-and-stale-crashers-are-cleared ok "" "" 0 'fuzz lane: ok \(4 targets, 1s each\)' "" "$all"
+run one-fails-and-the-rest-still-run ok "FuzzB" "" 1 'FAIL: 1 of 4 targets failed' "a/testdata/fuzz/FuzzB/0123abcd" "$all" 'wrote no input'
+run keeps-only-new-inputs-not-tracked-seeds ok "FuzzA FuzzC" "" 1 'FAIL: 2 of 4 targets failed' \
   "a/testdata/fuzz/FuzzA/0123abcd c/d/testdata/fuzz/FuzzC/0123abcd" "$all"
 # FuzzA's input sits beside FuzzB's empty corpus: each target gets only its own.
-run a-failure-without-an-input-says-so ok "FuzzA" "FuzzB" 1 'example.com/m/a FuzzB wrote no input;FAIL: 2 of 3 targets failed' "a/testdata/fuzz/FuzzA/0123abcd" "$all"
+run a-failure-without-an-input-says-so ok "FuzzA" "FuzzB" 1 'example.com/m/a FuzzB wrote no input;FAIL: 2 of 4 targets failed' "a/testdata/fuzz/FuzzA/0123abcd" "$all"
 run a-failed-listing-shows-why-and-runs-nothing fails "" "" 1 'example.com/m/b \[setup failed\];FAIL: listing the fuzz targets' "" "" 'no fuzz targets found'
 run no-targets-is-a-failure empty "" "" 1 'FAIL: no fuzz targets found' "" ""
 fuzztime=""
-run without-fuzztime-each-target-gets-2m ok "" "" 0 'fuzz lane: ok \(3 targets, 2m each\)' "" "$(printf '%s' "$all" | sed 's/ 1s / 2m /g')"
+run without-fuzztime-each-target-gets-2m ok "" "" 0 'fuzz lane: ok \(4 targets, 2m each\)' "" "$(printf '%s' "$all" | sed 's/ 1s / 2m /g')"
 fuzztime=1s
 # The host decision targets run only when FUZZMATCH asks for them (#661): the rows above leave
-# FuzzHostDecisions out. FUZZMATCH picks targets by Go's pattern, and drops nothing else.
+# FuzzHostDecisions out, but not FuzzHostHeader, whose name only starts the same. FUZZMATCH picks targets by Go's pattern, and drops nothing else.
 fuzzmatch='^FuzzHostDecisions$'
 run fuzzmatch-runs-only-the-targets-it-names ok "" "" 0 'fuzz lane: ok \(1 targets, 1s each\)' "" "^\$ ^FuzzHostDecisions\$ 1s example.com/m/c/d"
 fuzzmatch='^Fuzz'
-run fuzzmatch-of-every-target-runs-the-host-targets-too ok "" "" 0 'fuzz lane: ok \(4 targets, 1s each\)' "" "$all;^\$ ^FuzzHostDecisions\$ 1s example.com/m/c/d"
+run fuzzmatch-of-every-target-runs-the-host-targets-too ok "" "" 0 'fuzz lane: ok \(5 targets, 1s each\)' "" "$all;^\$ ^FuzzHostDecisions\$ 1s example.com/m/c/d"
 fuzzmatch=
 
 # Outside the repository root the lane refuses to run, before it lists or deletes anything.

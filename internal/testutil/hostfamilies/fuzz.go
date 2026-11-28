@@ -49,21 +49,19 @@ func (z fuzzer) check(t testing.TB, h string) {
 		for _, at := range z.placings[c.Name] {
 			in := at[0] + h + at[1]
 			pass, _ := c.Judge(in)
-			known := z.listed[line(c.Name, foldASCII(in))]
+			known := z.isListed(c.Name, at, h)
+			// In a URL, a "/", "?", "#" or backslash ends the host: a list check judges the host before
+			// it, and the rest is a path (evil.example/@mcp.example.com is evil.example's).
+			if i := strings.IndexAny(h, "/?#\\"); c.Lists && !known && at[0] != "" && i >= 0 {
+				known = z.isListed(c.Name, at, h[:i])
+			}
 			host, port, err := z.split(h)
 			written := err == nil && hasWrittenForm(h, host, at[0] != "")
 			browser := at[0] + bracketed(z.serialize(host)) + port + at[1]
-			// A list check takes a listed address in any spelling (127.1, [0::1]): the form browsers
-			// write of one is listed.
-			if !known && written {
-				known = z.listed[line(c.Name, foldASCII(browser))]
-			}
 			switch {
 			case c.Denies && known && pass:
 				t.Errorf("%s no longer stops %q, a spelling of an input testdata/hostdecisions.allowed says it stops (a widening)", c.Name, in)
-			// In a URL, a "/", "?", "#" or backslash ends the host, so the rest of h is a path the list
-			// check does not judge.
-			case c.Lists && pass && !known && (at[0] == "" || !strings.ContainsAny(h, "/?#\\")):
+			case c.Lists && pass && !known:
 				t.Errorf("%s passes %q, which testdata/hostdecisions.allowed lists in no letter case (a widening): fix the check, or add the form to hostfamilies' families and its line by hand", c.Name, in)
 			}
 			if !pass || c.Denies || !written {
@@ -76,6 +74,16 @@ func (z fuzzer) check(t testing.TB, h string) {
 			}
 		}
 	}
+}
+
+// isListed reports whether the column's baseline lists h placed at at, or the form browsers write
+// of it: a list check takes a listed address in any spelling (127.1, [0::1]).
+func (z fuzzer) isListed(column string, at [2]string, h string) bool {
+	if z.listed[line(column, foldASCII(at[0]+h+at[1]))] {
+		return true
+	}
+	host, port, err := z.split(h)
+	return err == nil && hasWrittenForm(h, host, at[0] != "") && z.listed[line(column, foldASCII(at[0]+bracketed(z.serialize(host))+port+at[1]))]
 }
 
 // hasWrittenForm reports whether h, split into host, has a form browsers write to compare: it is
@@ -131,8 +139,8 @@ func cellSeeds() []string {
 	return out
 }
 
-// foldedBaseline is the second reader of the baseline, after checkBaseline, whose loop it copies.
-// foldedBaseline is the lines of testdata/hostdecisions.allowed, each input in ASCII lower case.
+// foldedBaseline is the lines of testdata/hostdecisions.allowed, each input in ASCII lower case. It
+// is the baseline's second reader, after checkBaseline, whose loop it copies.
 func foldedBaseline(t testing.TB) map[string]bool {
 	t.Helper()
 	allowed, err := readLines("testdata/hostdecisions.allowed")
