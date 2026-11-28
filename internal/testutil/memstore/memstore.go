@@ -22,7 +22,6 @@ type Store struct {
 	fail          map[string]error                 // by method name
 	after         map[string]func(context.Context) // by method name, run once the call returns
 	down          error                            // every method
-	sqlContext    bool                             // a call under an ended context fails, as on a SQL store
 	onCreateGrant func(*store.Grant)
 	grantIDs      []string
 }
@@ -63,15 +62,6 @@ func (s *Store) Fail(err error, names ...string) {
 	}
 }
 
-// SQLContext makes a call under an ended context fail with the context's error and change nothing,
-// as on the SQL stores (and memory.Store). Until then the store ignores a request's end, as the
-// broker tests written before #693 assume.
-func (s *Store) SQLContext() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sqlContext = true
-}
-
 // AfterCall runs f with the call's context each time the named method returns from the store,
 // before its caller sees the result (not when Fail or Down fails it first): a test ends a request
 // there, between the call that detects a misuse and the revocation that follows, or checks the
@@ -83,17 +73,6 @@ func (s *Store) AfterCall(name string, f func(context.Context)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.after[name] = f
-}
-
-// inner is the context a call passes to memory.Store: ctx under SQLContext, else ctx with its
-// ending removed.
-func (s *Store) inner(ctx context.Context) context.Context {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.sqlContext {
-		return ctx
-	}
-	return context.WithoutCancel(ctx)
 }
 
 // ran runs the AfterCall hook of method, if any, with the call's context.
@@ -142,7 +121,7 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 		return err
 	}
 	defer s.ran("Collect", ctx)
-	return s.Store.Collect(s.inner(ctx), now)
+	return s.Store.Collect(ctx, now)
 }
 
 func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
@@ -156,7 +135,7 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 		hook(&g)
 	}
 	defer s.ran("CreateGrant", ctx)
-	got, err := s.Store.CreateGrant(s.inner(ctx), g)
+	got, err := s.Store.CreateGrant(ctx, g)
 	if err == nil {
 		s.mu.Lock()
 		s.grantIDs = append(s.grantIDs, g.ID)
@@ -170,7 +149,7 @@ func (s *Store) Grant(ctx context.Context, id string) (store.Grant, error) {
 		return store.Grant{}, err
 	}
 	defer s.ran("Grant", ctx)
-	return s.Store.Grant(s.inner(ctx), id)
+	return s.Store.Grant(ctx, id)
 }
 
 func (s *Store) RevokeGrant(ctx context.Context, id string, at time.Time) error {
@@ -178,7 +157,7 @@ func (s *Store) RevokeGrant(ctx context.Context, id string, at time.Time) error 
 		return err
 	}
 	defer s.ran("RevokeGrant", ctx)
-	return s.Store.RevokeGrant(s.inner(ctx), id, at)
+	return s.Store.RevokeGrant(ctx, id, at)
 }
 
 func (s *Store) UpdateGrant(ctx context.Context, id string, expiresAt time.Time) error {
@@ -186,7 +165,7 @@ func (s *Store) UpdateGrant(ctx context.Context, id string, expiresAt time.Time)
 		return err
 	}
 	defer s.ran("UpdateGrant", ctx)
-	return s.Store.UpdateGrant(s.inner(ctx), id, expiresAt)
+	return s.Store.UpdateGrant(ctx, id, expiresAt)
 }
 
 func (s *Store) SetIdPTokens(ctx context.Context, id string, sealed []byte) error {
@@ -194,7 +173,7 @@ func (s *Store) SetIdPTokens(ctx context.Context, id string, sealed []byte) erro
 		return err
 	}
 	defer s.ran("SetIdPTokens", ctx)
-	return s.Store.SetIdPTokens(s.inner(ctx), id, sealed)
+	return s.Store.SetIdPTokens(ctx, id, sealed)
 }
 
 func (s *Store) RevokeSubject(ctx context.Context, subject string, before, at time.Time) error {
@@ -202,7 +181,7 @@ func (s *Store) RevokeSubject(ctx context.Context, subject string, before, at ti
 		return err
 	}
 	defer s.ran("RevokeSubject", ctx)
-	return s.Store.RevokeSubject(s.inner(ctx), subject, before, at)
+	return s.Store.RevokeSubject(ctx, subject, before, at)
 }
 
 func (s *Store) RevokeAll(ctx context.Context, before, at time.Time) error {
@@ -210,7 +189,7 @@ func (s *Store) RevokeAll(ctx context.Context, before, at time.Time) error {
 		return err
 	}
 	defer s.ran("RevokeAll", ctx)
-	return s.Store.RevokeAll(s.inner(ctx), before, at)
+	return s.Store.RevokeAll(ctx, before, at)
 }
 
 func (s *Store) PutCode(ctx context.Context, c store.PendingCode) error {
@@ -218,7 +197,7 @@ func (s *Store) PutCode(ctx context.Context, c store.PendingCode) error {
 		return err
 	}
 	defer s.ran("PutCode", ctx)
-	return s.Store.PutCode(s.inner(ctx), c)
+	return s.Store.PutCode(ctx, c)
 }
 
 func (s *Store) ConsumeCode(ctx context.Context, grantID string, now time.Time) (store.PendingCode, error) {
@@ -226,7 +205,7 @@ func (s *Store) ConsumeCode(ctx context.Context, grantID string, now time.Time) 
 		return store.PendingCode{}, err
 	}
 	defer s.ran("ConsumeCode", ctx)
-	return s.Store.ConsumeCode(s.inner(ctx), grantID, now)
+	return s.Store.ConsumeCode(ctx, grantID, now)
 }
 
 func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
@@ -234,7 +213,7 @@ func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, exp
 		return err
 	}
 	defer s.ran("SpendLogin", ctx)
-	return s.Store.SpendLogin(s.inner(ctx), hash, now, expiresAt)
+	return s.Store.SpendLogin(ctx, hash, now, expiresAt)
 }
 
 func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
@@ -242,7 +221,7 @@ func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now,
 		return err
 	}
 	defer s.ran("SpendAssertion", ctx)
-	return s.Store.SpendAssertion(s.inner(ctx), hash, now, expiresAt)
+	return s.Store.SpendAssertion(ctx, hash, now, expiresAt)
 }
 
 func (s *Store) PutRefreshToken(ctx context.Context, t store.RefreshToken) error {
@@ -250,7 +229,7 @@ func (s *Store) PutRefreshToken(ctx context.Context, t store.RefreshToken) error
 		return err
 	}
 	defer s.ran("PutRefreshToken", ctx)
-	return s.Store.PutRefreshToken(s.inner(ctx), t)
+	return s.Store.PutRefreshToken(ctx, t)
 }
 
 func (s *Store) RefreshToken(ctx context.Context, hash [sha256.Size]byte, now time.Time) (store.RefreshToken, error) {
@@ -258,7 +237,7 @@ func (s *Store) RefreshToken(ctx context.Context, hash [sha256.Size]byte, now ti
 		return store.RefreshToken{}, err
 	}
 	defer s.ran("RefreshToken", ctx)
-	return s.Store.RefreshToken(s.inner(ctx), hash, now)
+	return s.Store.RefreshToken(ctx, hash, now)
 }
 
 func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) error {
@@ -266,7 +245,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) e
 		return err
 	}
 	defer s.ran("RotateRefreshToken", ctx)
-	return s.Store.RotateRefreshToken(s.inner(ctx), r)
+	return s.Store.RotateRefreshToken(ctx, r)
 }
 
 func (s *Store) Revocations(ctx context.Context) ([]store.Revocation, error) {
@@ -274,7 +253,7 @@ func (s *Store) Revocations(ctx context.Context) ([]store.Revocation, error) {
 		return nil, err
 	}
 	defer s.ran("Revocations", ctx)
-	return s.Store.Revocations(s.inner(ctx))
+	return s.Store.Revocations(ctx)
 }
 
 func (s *Store) CreateClient(ctx context.Context, c store.Client, maxClients int) error {
@@ -282,7 +261,7 @@ func (s *Store) CreateClient(ctx context.Context, c store.Client, maxClients int
 		return err
 	}
 	defer s.ran("CreateClient", ctx)
-	return s.Store.CreateClient(s.inner(ctx), c, maxClients)
+	return s.Store.CreateClient(ctx, c, maxClients)
 }
 
 func (s *Store) Client(ctx context.Context, id string) (store.Client, error) {
@@ -290,7 +269,7 @@ func (s *Store) Client(ctx context.Context, id string) (store.Client, error) {
 		return store.Client{}, err
 	}
 	defer s.ran("Client", ctx)
-	return s.Store.Client(s.inner(ctx), id)
+	return s.Store.Client(ctx, id)
 }
 
 func (s *Store) UseClient(ctx context.Context, id string, now, expires time.Time, minExtension time.Duration) error {
@@ -298,7 +277,7 @@ func (s *Store) UseClient(ctx context.Context, id string, now, expires time.Time
 		return err
 	}
 	defer s.ran("UseClient", ctx)
-	return s.Store.UseClient(s.inner(ctx), id, now, expires, minExtension)
+	return s.Store.UseClient(ctx, id, now, expires, minExtension)
 }
 
 func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
@@ -306,7 +285,7 @@ func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
 		return err
 	}
 	defer s.ran("RememberConsent", ctx)
-	return s.Store.RememberConsent(s.inner(ctx), c)
+	return s.Store.RememberConsent(ctx, c)
 }
 
 func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
@@ -314,7 +293,7 @@ func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent,
 		return store.Consent{}, err
 	}
 	defer s.ran("Consent", ctx)
-	return s.Store.Consent(s.inner(ctx), k)
+	return s.Store.Consent(ctx, k)
 }
 
 var _ store.Store = (*Store)(nil)

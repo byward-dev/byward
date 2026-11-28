@@ -14,7 +14,7 @@ import (
 )
 
 // A misuse detected on a request that then ends still revokes its grant in the store (#693). The
-// store fails a call under an ended context, as the SQL stores do (memstore.SQLContext), and the
+// store fails a call under an ended context, as the SQL stores do (memstore, since #693), and the
 // request ends, as its client going away or the proxy's shutdown, right after the store call that
 // detects the misuse. The grant is gone from the store, so every replica refuses it and its refresh
 // tokens stop, not only this replica's deny list, and the revocation is audited with its reason and
@@ -86,7 +86,6 @@ func TestAMisuseDetectedOnARequestThatThenEndsRevokesItsGrantInTheStore(t *testi
 				e := newEnv(t, tc.opts...)
 				path, form := tc.prepare(t, e)
 				grantID := lastGrant(e.st)
-				e.st.SQLContext()
 				ctx, stop := end.Start(t.Context())
 				t.Cleanup(stop)
 				e.st.AfterCall(tc.after, func(context.Context) { stop() })
@@ -125,7 +124,6 @@ func TestADCRClientWhoseRedemptionEndsIsStillMarkedUsed(t *testing.T) {
 			e := newEnv(t, withDCR(nil))
 			id := registerDCR(t, e, cb)
 			code := e.signIn(t, url.Values{"client_id": {id}, "redirect_uri": {cb}, "scope": {"mcp offline_access"}}).Query().Get("code")
-			e.st.SQLContext()
 			ctx, stop := end.Start(t.Context())
 			t.Cleanup(stop)
 			e.st.AfterCall("Grant", func(context.Context) { stop() }) // the grant's identity claims: the last store call before recordUse
@@ -172,7 +170,6 @@ func TestADCRClientsRevocationOnARequestThatEndedStillEndsItsGrant(t *testing.T)
 			e := newEnv(t, withDCR(nil))
 			c := dcrSignInTo(t, e, "https://app.example/cb")
 			grantID := lastGrant(e.st)
-			e.st.SQLContext()
 			e.st.AfterCall("RevokeGrant", func(call context.Context) { wantBounded(t, call) })
 			e.st.AfterCall("Client", func(call context.Context) { wantBounded(t, call) }) // the DCR client's own lookup
 			f := url.Values{"token": {c.tokens["refresh_token"].(string)}, "client_id": {c.clientID}}
@@ -239,7 +236,6 @@ func TestARevocationWhoseClientAuthenticationIsAStoreCallStillEndsItsGrant(t *te
 			grantID := lastGrant(e.st)
 			var lookup time.Time
 			e.b.cfg.Clients = replayCheckedClients{e.b.cfg.Clients, &lookup}
-			e.st.SQLContext()
 			e.st.AfterCall("RevokeGrant", func(call context.Context) {
 				wantBounded(t, call)
 				if d, _ := call.Deadline(); lookup.IsZero() || !d.After(lookup) {

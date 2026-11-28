@@ -78,24 +78,28 @@ func (b *Broker) remembered(ctx context.Context, h hint, l login, allowsRefresh 
 
 // skipConsent decides at /authorize whether the page may be skipped: a client whose consent is
 // remembered, no prompt=consent, and a hint naming a user with a live consent for this request.
-// It sets l.Hint for the callback's check. A store failure shows the page.
-func (b *Broker) skipConsent(r *http.Request, client registration.Client, l *login) bool {
+// It sets l.Hint for the callback's check. A store failure shows the page; a request that ended as
+// the consent was read is answered by how it ended (endedStoreCall), and answered reports it.
+func (b *Broker) skipConsent(w http.ResponseWriter, r *http.Request, client registration.Client, l *login) (skip, answered bool) {
 	if !b.remembers(client) || forcesConsent(r.URL.Query().Get("prompt")) {
-		return false
+		return false, false
 	}
 	h, ok := b.readHint(r)
 	if !ok {
-		return false
+		return false, false
 	}
 	ok, err := b.remembered(r.Context(), h, *l, l.Refresh, b.cfg.Now())
+	if endedStoreCall(w, r, err) {
+		return false, true
+	}
 	if err != nil {
 		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed; asking", "error", err.Error())
-		return false
+		return false, false
 	}
 	if ok {
 		l.Hint = &h
 	}
-	return ok
+	return ok, false
 }
 
 // confirmRemembered is the callback's check of a login that skipped the page: the user who signed

@@ -71,6 +71,8 @@ func (b *Broker) register(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", registrationRetryAfter)
 		b.registrationFailed(w, r, RegistrationFull, http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy is not accepting new registrations now")
 		return
+	case endedStoreCall(w, r, err): // a request that ended as its registration was stored (#693)
+		return
 	case err != nil:
 		b.cfg.Log.ErrorContext(r.Context(), "registering a client failed", "error", err.Error())
 		w.Header().Set("Retry-After", registrationRetryAfter)

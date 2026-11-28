@@ -126,7 +126,7 @@ func (r *DCRRegistry) Register(ctx context.Context, body []byte) (*Registered, e
 	case errors.Is(err, store.ErrFull):
 		return nil, ErrRegistrationsFull
 	case err != nil:
-		return nil, fmt.Errorf("%w: storing a client registration: %v", ErrStoreUnavailable, err)
+		return nil, fmt.Errorf("%w: storing a client registration: %w", ErrStoreUnavailable, err)
 	}
 	for i, u := range dropped {
 		dropped[i] = logging.URL(u)
@@ -157,7 +157,7 @@ func (r *DCRRegistry) Client(ctx context.Context, id string) (Client, error) {
 	case errors.Is(err, store.ErrNotFound):
 		return nil, ErrUnknownClient
 	case err != nil:
-		return nil, fmt.Errorf("%w: loading a client registration: %v", ErrStoreUnavailable, err)
+		return nil, fmt.Errorf("%w: loading a client registration: %w", ErrStoreUnavailable, err)
 	case !r.cfg.Now().Before(rec.ExpiresAt):
 		return nil, fmt.Errorf("%w: client registration expired", ErrUnknownClient)
 	}

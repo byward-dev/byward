@@ -197,8 +197,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		// An outage is not the client's fault: the code may still be good.
-		b.cfg.Log.ErrorContext(ctx, "redeeming an authorization code failed", "error", err)
-		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not redeem the code; try again"})
+		b.storeFailed(w, r, "redeeming an authorization code failed", err, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not redeem the code; try again"})
 		return
 	}
 	// The operator denied the app (ADR-0008 §9, #338) after the user signed in: end the grant as a
@@ -236,8 +235,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		expires = now.Add(GrantLifetime)
 	}
 	if err := b.cfg.Store.UpdateGrant(ctx, claims.GrantID, expires); err != nil {
-		b.cfg.Log.ErrorContext(ctx, "extending a grant failed", "error", err)
-		b.tokenFail(w, r, cannotIssue)
+		b.storeFailed(w, r, "extending a grant failed", err, cannotIssue)
 		return
 	}
 	var refresh string
@@ -246,8 +244,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		refresh, hash = token.NewRefreshToken()
 		if err := b.cfg.Store.PutRefreshToken(ctx, store.RefreshToken{Hash: hash, GrantID: claims.GrantID, ClientID: client.ID(),
 			CreatedAt: now, IdleExpiresAt: minTime(now.Add(RefreshIdleLifetime), expires)}); err != nil {
-			b.cfg.Log.ErrorContext(ctx, "storing a refresh token failed", "error", err)
-			b.tokenFail(w, r, cannotIssue)
+			b.storeFailed(w, r, "storing a refresh token failed", err, cannotIssue)
 			return
 		}
 	}
@@ -257,8 +254,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	}
 	asserted, idpExpiry, err := b.grantClaims(ctx, claims.GrantID)
 	if err != nil {
-		b.cfg.Log.ErrorContext(ctx, "reading a grant's identity claims failed", "error", err)
-		b.tokenFail(w, r, cannotIssue)
+		b.storeFailed(w, r, "reading a grant's identity claims failed", err, cannotIssue)
 		return
 	}
 	b.recordUse(ctx, client, now)
@@ -450,9 +446,31 @@ const retryAfter = "5"
 // for now: about one per-URL retry gap and cache minimum (docs/how-to/cimd.md).
 const cimdRetryAfter = "60"
 
+// endedStoreCall answers r by how it ended, and reports whether it did, when err is its ending's: a
+// store call on a request whose client went away, or that the proxy's shutdown ended, fails with
+// context.Canceled, and that request is answered as it ended (shutdown.AnswerIfEnded), with nothing
+// logged as a failure (#527, #693). A detached call's own timeout (DeadlineExceeded) and a store
+// failure are the caller's to log.
+func endedStoreCall(w http.ResponseWriter, r *http.Request, err error) bool {
+	return errors.Is(err, context.Canceled) && shutdown.AnswerIfEnded(w, r)
+}
+
+// storeFailed answers a /token store failure: by how the request ended, if that is why it failed
+// (endedStoreCall), else with ERROR what and answer.
+func (b *Broker) storeFailed(w http.ResponseWriter, r *http.Request, what string, err error, answer tokenError) {
+	if endedStoreCall(w, r, err) {
+		return
+	}
+	b.cfg.Log.ErrorContext(r.Context(), what, "error", err)
+	b.tokenFail(w, r, answer)
+}
+
 // unavailable answers 503 with Retry-After for a store failure (ADR-0007 §7); the refresh token is
-// not spent.
+// not spent. A request that ended is answered by how it ended (endedStoreCall).
 func (b *Broker) unavailable(w http.ResponseWriter, r *http.Request, what string, err error) {
+	if endedStoreCall(w, r, err) {
+		return
+	}
 	ctx := r.Context()
 	b.cfg.Log.ErrorContext(ctx, what, "error", err)
 	w.Header().Set("Retry-After", retryAfter)

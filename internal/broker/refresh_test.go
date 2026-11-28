@@ -368,7 +368,6 @@ func TestAClientThatGivesUpMidRefreshKeepsTheIdPsNewTokens(t *testing.T) {
 	})
 	e.fake.Set(fakeidp.WithSingleUseRefreshTokens(true))
 	rt := e.offline(t)["refresh_token"].(string)
-	e.st.SQLContext() // a store write under the ended request fails, as on a SQL store
 	e.st.AfterCall("SetIdPTokens", func(call context.Context) { wantBounded(t, call) })
 	hang.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())

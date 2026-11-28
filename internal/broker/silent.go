@@ -41,6 +41,8 @@ func (b *Broker) authorizeSilently(w http.ResponseWriter, r *http.Request, clien
 	}
 	ok, err := b.remembered(r.Context(), h, l, l.Refresh, b.cfg.Now())
 	switch {
+	case endedStoreCall(w, r, err): // a request that ended as it was checked (#693)
+		return
 	case err != nil:
 		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed", "error", err.Error())
 		b.refuseSilently(w, r, client.Trust(), l, "temporarily_unavailable", "the proxy could not check the consent; try again")

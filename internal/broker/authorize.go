@@ -169,7 +169,11 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 		b.authorizeSilently(w, r, client, l)
 		return
 	}
-	if b.skipConsent(r, client, &l) {
+	skip, answered := b.skipConsent(w, r, client, &l)
+	switch {
+	case answered:
+		return
+	case skip:
 		b.startLogin(w, r, l, b.cfg.Now())
 		return
 	}
@@ -185,6 +189,9 @@ func (b *Broker) loadClient(w http.ResponseWriter, r *http.Request, clientID, re
 		return nil, false
 	}
 	if errors.Is(err, registration.ErrStoreUnavailable) { // a DCR registration could not be read: the store, not the client
+		if endedStoreCall(w, r, err) {
+			return nil, false
+		}
 		b.cfg.Log.ErrorContext(ctx, "loading a client registration failed", "error", err)
 		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
 		return nil, false
@@ -377,6 +384,9 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if spent != nil { // the store is down: no login goes on unrecorded
+		if endedStoreCall(w, r, spent) {
+			return
+		}
 		if l.Silent {
 			b.cfg.Log.ErrorContext(ctx, "recording a used login failed", "error", spent)
 			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the proxy could not record the sign-in; try again")
@@ -600,6 +610,9 @@ func idpOutcome(err error) string {
 }
 
 func (b *Broker) serverError(w http.ResponseWriter, r *http.Request, err error) {
+	if endedStoreCall(w, r, err) { // a store call on a request that ended: answered by how it ended (#693)
+		return
+	}
 	ctx := r.Context()
 	b.cfg.Log.ErrorContext(ctx, "broker error", "error", err)
 	b.page(w, r, http.StatusInternalServerError, "Something went wrong on the proxy.", "Try again; if it keeps failing, tell your operator the reference below.")

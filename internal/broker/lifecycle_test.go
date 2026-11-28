@@ -106,6 +106,17 @@ func (e *env) cutIn(t *testing.T, end lifecycle.Ended, r *http.Request, body *li
 	}
 }
 
+// endingAfter is a request context that ends as end does once the store's named method returns:
+// the request was live for every store call before it, as one that ends while it waits on the IdP
+// after its lookups (#693: a store fails a call on an ended context).
+func (e *env) endingAfter(t *testing.T, end lifecycle.Ended, method string) context.Context {
+	t.Helper()
+	ctx, stop := end.Start(context.Background())
+	t.Cleanup(stop)
+	e.st.AfterCall(method, func(context.Context) { stop() })
+	return ctx
+}
+
 // endedCtx is a request context that ended as e does.
 func endedCtx(e lifecycle.Ended) context.Context {
 	ctx, stop := e.Start(context.Background())
@@ -131,7 +142,6 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 		whole       = "the broker writes whole answers: no interim response, stream, trailer or upgrade"
 		noOutbound  = "nothing goes outbound before the broker reads a body or looks a client up"
 		noPreBound  = "the broker sets no bound on its work before a body read or lookup"
-		storeCalls  = "a request that ended with its body read runs to completion; its store calls under the ended context are #693, which memstore cannot show (a callback's calls after its spent login are detached, so only its spendLogin is)"
 		readBound   = "the server's ReadTimeout bounds a stalled body, not the broker"
 		inFlightOut = "nothing goes outbound while the broker reads a body"
 	)
@@ -143,8 +153,6 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 		}
 	}
 	m[at(lifecycle.Completes, lifecycle.NotStarted)] = lifecycle.Unreachable("a request that completes got past its body read or lookup")
-	m[at(lifecycle.ClientGone, lifecycle.NotStarted)] = lifecycle.NotRun(storeCalls)
-	m[at(lifecycle.Shutdown, lifecycle.NotStarted)] = lifecycle.NotRun(storeCalls)
 	m[at(lifecycle.UpstreamGone, lifecycle.NotStarted)] = lifecycle.Unreachable(noOutbound)
 	m[at(lifecycle.Timeout, lifecycle.NotStarted)] = lifecycle.Unreachable(noPreBound)
 	m[at(lifecycle.Completes, lifecycle.BodyInFlight)] = lifecycle.NotRun("TestTokenAndRevokeReadAFormOfUpTo64KiB and the registration tests pin a body read whole")
@@ -155,6 +163,68 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 	m[at(lifecycle.Timeout, lifecycle.AwaitingHeaders)] = lifecycle.NotRun("a fetch that times out is a transient failure, answered as upstream gone; TestTheCIMDFetchLifecycleMatrix pins the timeout")
 
 	for _, end := range lifecycle.ContextEndings {
+		// A request that ended before its store calls: each fails with the ending's error, as on a SQL
+		// store (memstore fails a call on an ended context), and the request is answered by how it
+		// ended, with nothing logged as a failure or audited (endedStoreCall, #693).
+		m[at(end.Ending, lifecycle.NotStarted)] = lifecycle.Pinned(func(t *testing.T) {
+			authorize := func(extra url.Values) *http.Request {
+				return httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+authorizeQuery(extra).Encode(), nil)
+			}
+			for name, ready := range map[string]func(t *testing.T) (*env, *http.Request){
+				"/token, a refresh": func(t *testing.T) (*env, *http.Request) {
+					e := newEnv(t)
+					return e, formRequest("/token", strings.NewReader(refreshForm(e.offline(t)["refresh_token"].(string), clientID).Encode()))
+				},
+				"/token, a code": func(t *testing.T) (*env, *http.Request) {
+					e := newEnv(t)
+					return e, formRequest("/token", strings.NewReader(redeemForm(e.signIn(t, nil).Query().Get("code"), nil).Encode()))
+				},
+				"/token, a DCR client's lookup": func(t *testing.T) (*env, *http.Request) {
+					e := newEnv(t, withDCR(nil))
+					c := dcrSignInTo(t, e, "https://app.example/cb")
+					return e, formRequest("/token", strings.NewReader(refreshForm(c.tokens["refresh_token"].(string), c.clientID).Encode()))
+				},
+				"/authorize, a DCR client's lookup": func(t *testing.T) (*env, *http.Request) {
+					e := newEnv(t, withDCR(nil))
+					id := registerDCR(t, e, "https://app.example/cb")
+					return e, authorize(url.Values{"client_id": {id}, "redirect_uri": {"https://app.example/cb"}})
+				},
+				"/authorize, a remembered consent": func(t *testing.T) (*env, *http.Request) {
+					e := newEnv(t, withRemember(t, nil))
+					h := e.remember(t, nil)
+					r := authorize(nil)
+					r.AddCookie(h)
+					return e, r
+				},
+				"/authorize prompt=none, a remembered consent": func(t *testing.T) (*env, *http.Request) {
+					e := newEnv(t, withRemember(t, nil))
+					h := e.remember(t, nil)
+					r := authorize(silent(nil))
+					r.AddCookie(h)
+					return e, r
+				},
+				"/callback, its login": func(t *testing.T) (*env, *http.Request) {
+					e := newEnv(t)
+					cookie, cb := e.startLogin(t, nil)
+					r := httptest.NewRequest(http.MethodGet, issuer+"/callback/entra?"+cb.RawQuery, nil)
+					r.AddCookie(cookie)
+					return e, r
+				},
+				"/register": func(t *testing.T) (*env, *http.Request) {
+					e := newEnv(t, withDCR(nil))
+					r := httptest.NewRequest(http.MethodPost, issuer+"/register", strings.NewReader(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`))
+					r.Header.Set("Content-Type", "application/json")
+					return e, r
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					e, r := ready(t)
+					lm, am := e.marks()
+					e.endedAnswer(t, end, e.serveIn(endedCtx(end), r), lm, am)
+				})
+			}
+		})
+
 		m[at(end.Ending, lifecycle.BodyInFlight)] = lifecycle.Pinned(func(t *testing.T) {
 			t.Run("/register", func(t *testing.T) {
 				e := newEnv(t, withDCR(nil))
@@ -225,7 +295,11 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					lm, am := e.marks()
 					ops := len(e.idpOps)
 					f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
-					e.endedAnswer(t, end, e.serveIn(endedCtx(end), formRequest(tc.path, strings.NewReader(f.Encode()))), lm, am)
+					ctx := endedCtx(end) // the lookup waits: it ends before any store call
+					if tc.mode == modeOK {
+						ctx = e.endingAfter(t, end, "Grant") // the client resolves; the request ends once the grant is read, as the refresh waits on the IdP
+					}
+					e.endedAnswer(t, end, e.serveIn(ctx, formRequest(tc.path, strings.NewReader(f.Encode()))), lm, am)
 					if tc.mode == modeOK && !slices.Contains(e.idpOps[ops:], OpRefresh+" unavailable") {
 						t.Errorf("IdP calls %q; want the refresh to have reached the IdP", e.idpOps[ops:])
 					}
@@ -294,7 +368,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					before := len(counted.list())
 					r := httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+authorizeQuery(silent(nil)).Encode(), nil)
 					r.AddCookie(h)
-					w := e.serveIn(endedCtx(end), r)
+					w := e.serveIn(e.endingAfter(t, end, "Consent"), r) // ends once the remembered consent is read, before the IdP
 					end.Answered(t, w)
 					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: tc.warns, audit: tc.audit})
 					if got := counted.list()[before:]; !slices.Equal(got, tc.counted) {
@@ -310,7 +384,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				lm, am := e.marks()
 				r := httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+authorizeQuery(silent(nil)).Encode(), nil)
 				r.AddCookie(h)
-				w := e.serveIn(endedCtx(end), r)
+				w := e.serveIn(e.endingAfter(t, end, "Consent"), r)
 				e.pinned(t, w, lm, am, brokerCell{status: http.StatusSeeOther})
 				if loc := w.Header().Get("Location"); !strings.Contains(loc, "/oauth2/v2.0/authorize") {
 					t.Errorf("redirected to %q; want the IdP's sign-in", loc)
@@ -329,7 +403,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					}}
 					lm, am := e.marks()
 					f := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {d.ClientID}}
-					w := e.serveIn(endedCtx(end), formRequest("/token", strings.NewReader(f.Encode())))
+					w := e.serveIn(e.endingAfter(t, end, "Grant"), formRequest("/token", strings.NewReader(f.Encode())))
 					end.Answered(t, w)
 					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: []string{"IdP refresh failed"}, audit: []string{"token_rejected failure"}})
 				})
@@ -343,7 +417,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				lm, am := e.marks()
 				r := httptest.NewRequest(http.MethodGet, issuer+"/callback/entra?"+cb.RawQuery, nil)
 				r.AddCookie(cookie)
-				e.callbackFinished(t, end, e.serveIn(endedCtx(end), r), lm, am)
+				e.callbackFinished(t, end, e.serveIn(e.endingAfter(t, end, "SpendLogin"), r), lm, am) // ends once the login is spent
 			})
 			// The IdP refuses the code exchange: a browser that went away is still sent nothing, and
 			// no failure is logged or audited for it; a shutdown's browser, still there, is told the
@@ -356,7 +430,7 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 				lm, am := e.marks()
 				r := httptest.NewRequest(http.MethodGet, issuer+"/callback/entra?"+cb.RawQuery, nil)
 				r.AddCookie(cookie)
-				w := e.serveIn(endedCtx(end), r)
+				w := e.serveIn(e.endingAfter(t, end, "SpendLogin"), r)
 				if end.Ending == lifecycle.ClientGone {
 					e.endedAnswer(t, end, w, lm, am)
 					return
@@ -486,7 +560,6 @@ func TestARefusedClientWhoseRequestEndedStillLosesItsGrant(t *testing.T) {
 					path, f := ready(t, c)
 					grantID := c.onlyGrant(t)
 					c.refuse()
-					c.e.st.SQLContext()
 					for _, m := range []string{"Grant", "RefreshToken", "RevokeGrant"} { // the revocation and the lookup before it
 						c.e.st.AfterCall(m, func(call context.Context) { wantBounded(t, call) })
 					}

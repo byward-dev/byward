@@ -105,10 +105,10 @@ func TestTheEmbeddedStoreBypassesFailuresAndHooksSeeGrants(t *testing.T) {
 	}
 }
 
-// Every store.Store method ignores an ended context by default and fails under one with SQLContext,
-// and runs its own AfterCall hook (and no other method's) once it returns, so a wrapper that passes
-// the wrong context, or names the wrong method, fails here (#693).
-func TestEveryMethodHonoursSQLContextAndAfterCall(t *testing.T) {
+// Every store.Store method fails under an ended context, as the SQL stores do, and runs its own
+// AfterCall hook (and no other method's) once it returns, so a wrapper that passes the wrong
+// context, or names the wrong method, fails here (#693).
+func TestEveryMethodFailsUnderAnEndedContextAndRunsItsAfterCall(t *testing.T) {
 	ended, cancel := context.WithCancel(context.Background())
 	cancel()
 	iface := reflect.TypeFor[store.Store]()
@@ -116,12 +116,8 @@ func TestEveryMethodHonoursSQLContextAndAfterCall(t *testing.T) {
 		name := iface.Method(i).Name
 		t.Run(name, func(t *testing.T) {
 			s := New()
-			if err := callIn(s, ended, name); errors.Is(err, context.Canceled) {
-				t.Errorf("%s under an ended context, by default: %v, want the ending ignored", name, err)
-			}
-			s.SQLContext()
 			if err := callIn(s, ended, name); !errors.Is(err, context.Canceled) {
-				t.Errorf("%s under an ended context, with SQLContext: %v, want context.Canceled", name, err)
+				t.Errorf("%s under an ended context: %v, want context.Canceled", name, err)
 			}
 			other := "Grant"
 			if name == other {
@@ -144,12 +140,8 @@ func TestEveryMethodHonoursSQLContextAndAfterCall(t *testing.T) {
 	}
 }
 
-// Under SQLContext the store keeps every contract of store.Store, the one for an ended context
-// included (storetest): the broker tests that use it see what a SQL store would do.
-func TestUnderSQLContextTheStoreKeepsEveryStoreContract(t *testing.T) {
-	storetest.Run(t, func(*testing.T) store.Store {
-		s := New()
-		s.SQLContext()
-		return s
-	})
+// The store keeps every contract of store.Store, the one for an ended context included (storetest):
+// the broker tests that use it see what a SQL store would do.
+func TestTheStoreKeepsEveryStoreContract(t *testing.T) {
+	storetest.Run(t, func(*testing.T) store.Store { return New() })
 }
