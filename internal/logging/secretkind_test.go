@@ -310,6 +310,10 @@ func TestShownSecretKindReadsAJSONDocumentByItsParts(t *testing.T) {
 		{"allowed: a split before the :", `{"postgres://u":"` + "pw@h" + `"}`, ""},
 		{"allowed: a split at the :", `["postgres://u:","` + "pw@h" + `"]`, ""},
 		{"allowed: a split after an all-digit part", `["postgres://u:123","` + "4@h" + `"]`, ""},
+		// The same class, stated whole: a connection string with a password, cut across two JSON strings, that the list rule does not find (text before the scheme, a percent-encoded @, or a password trimmed away), is allowed by decision (#657).
+		{"allowed: text before the scheme", `["dsn=postgres://app:Q7pw","` + "x@db" + `"]`, ""},
+		{"allowed: a percent-encoded @", `["postgres://app:Q7pw","` + "x%40db" + `"]`, ""},
+		{"allowed: a password trimmed away", `["postgres://app:\"","` + "@db" + `"]`, ""},
 		{"two kinds, named by the first key", `{"a":"` + fakeToken("ghp_") + `","z":"` + dsn + `"}`, "a GitHub token"},
 		{"text before the JSON", `time=1 {"endpoint":"https://api.example.com:8443","user":"bob@x.example"}`, passwordKind},
 		{"a line cut short", `{"endpoint":"https://api.example.com:8443","user":"bob@x.example"`, passwordKind},

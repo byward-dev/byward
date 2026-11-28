@@ -14,6 +14,9 @@ startup log, a free-text setting | JSON line naming an origin, then an email | s
 startup log, a free-text setting | password cut across JSON before the : | shown
 startup log, a free-text setting | password cut across JSON at the : | shown
 startup log, a free-text setting | password cut across JSON after an all-digit part | shown
+startup log, a free-text setting | password cut across JSON, text before the scheme | shown
+startup log, a free-text setting | password cut across JSON, a percent-encoded @ | shown
+startup log, a free-text setting | password cut across JSON, a password trimmed away | shown
 --print-config, a free-text setting | userinfo | refused
 --print-config, a free-text setting | DSN key=value | refused
 --print-config, a free-text setting | GitHub token | refused
@@ -29,6 +32,9 @@ startup log, a free-text setting | password cut across JSON after an all-digit p
 --print-config, a free-text setting | password cut across JSON before the : | shown
 --print-config, a free-text setting | password cut across JSON at the : | shown
 --print-config, a free-text setting | password cut across JSON after an all-digit part | shown
+--print-config, a free-text setting | password cut across JSON, text before the scheme | shown
+--print-config, a free-text setting | password cut across JSON, a percent-encoded @ | shown
+--print-config, a free-text setting | password cut across JSON, a password trimmed away | shown
 --print-config, a URL setting's path | userinfo | kept out
 --print-config, a URL setting's path | DSN key=value | refused
 --print-config, a URL setting's path | GitHub token | refused
@@ -44,6 +50,9 @@ startup log, a free-text setting | password cut across JSON after an all-digit p
 --print-config, a URL setting's path | password cut across JSON before the : | kept out
 --print-config, a URL setting's path | password cut across JSON at the : | kept out
 --print-config, a URL setting's path | password cut across JSON after an all-digit part | kept out
+--print-config, a URL setting's path | password cut across JSON, text before the scheme | kept out
+--print-config, a URL setting's path | password cut across JSON, a percent-encoded @ | kept out
+--print-config, a URL setting's path | password cut across JSON, a password trimmed away | kept out
 --print-config, a list setting's entry | userinfo | refused
 --print-config, a list setting's entry | DSN key=value | refused
 --print-config, a list setting's entry | GitHub token | refused
@@ -59,6 +68,9 @@ startup log, a free-text setting | password cut across JSON after an all-digit p
 --print-config, a list setting's entry | password cut across JSON before the : | refused
 --print-config, a list setting's entry | password cut across JSON at the : | refused
 --print-config, a list setting's entry | password cut across JSON after an all-digit part | refused
+--print-config, a list setting's entry | password cut across JSON, text before the scheme | refused
+--print-config, a list setting's entry | password cut across JSON, a percent-encoded @ | refused
+--print-config, a list setting's entry | password cut across JSON, a password trimmed away | refused
 --print-config, a URL list setting's entry | userinfo | kept out
 --print-config, a URL list setting's entry | DSN key=value | refused
 --print-config, a URL list setting's entry | GitHub token | refused
@@ -74,6 +86,9 @@ startup log, a free-text setting | password cut across JSON after an all-digit p
 --print-config, a URL list setting's entry | password cut across JSON before the : | kept out
 --print-config, a URL list setting's entry | password cut across JSON at the : | refused
 --print-config, a URL list setting's entry | password cut across JSON after an all-digit part | refused
+--print-config, a URL list setting's entry | password cut across JSON, text before the scheme | refused
+--print-config, a URL list setting's entry | password cut across JSON, a percent-encoded @ | refused
+--print-config, a URL list setting's entry | password cut across JSON, a password trimmed away | refused
 --print-config, a path setting | userinfo | refused
 --print-config, a path setting | DSN key=value | refused
 --print-config, a path setting | GitHub token | refused
@@ -89,6 +104,9 @@ startup log, a free-text setting | password cut across JSON after an all-digit p
 --print-config, a path setting | password cut across JSON before the : | refused
 --print-config, a path setting | password cut across JSON at the : | refused
 --print-config, a path setting | password cut across JSON after an all-digit part | refused
+--print-config, a path setting | password cut across JSON, text before the scheme | refused
+--print-config, a path setting | password cut across JSON, a percent-encoded @ | refused
+--print-config, a path setting | password cut across JSON, a password trimmed away | refused
 --print-config, the stdio upstream's program | userinfo | refused
 --print-config, the stdio upstream's program | DSN key=value | refused
 --print-config, the stdio upstream's program | GitHub token | refused
@@ -104,6 +122,9 @@ startup log, a free-text setting | password cut across JSON after an all-digit p
 --print-config, the stdio upstream's program | password cut across JSON before the : | refused
 --print-config, the stdio upstream's program | password cut across JSON at the : | refused
 --print-config, the stdio upstream's program | password cut across JSON after an all-digit part | refused
+--print-config, the stdio upstream's program | password cut across JSON, text before the scheme | refused
+--print-config, the stdio upstream's program | password cut across JSON, a percent-encoded @ | refused
+--print-config, the stdio upstream's program | password cut across JSON, a password trimmed away | refused
 check --offline, a free-text setting | userinfo | refused
 check --offline, a free-text setting | DSN key=value | refused
 check --offline, a free-text setting | GitHub token | refused
@@ -119,6 +140,9 @@ check --offline, a free-text setting | JSON line naming an origin, then an email
 check --offline, a free-text setting | password cut across JSON before the : | kept out
 check --offline, a free-text setting | password cut across JSON at the : | kept out
 check --offline, a free-text setting | password cut across JSON after an all-digit part | kept out
+check --offline, a free-text setting | password cut across JSON, text before the scheme | kept out
+check --offline, a free-text setting | password cut across JSON, a percent-encoded @ | kept out
+check --offline, a free-text setting | password cut across JSON, a password trimmed away | kept out
 doctor, a free-text setting | userinfo | refused
 doctor, a free-text setting | DSN key=value | refused
 doctor, a free-text setting | GitHub token | refused
@@ -134,6 +158,9 @@ doctor, a free-text setting | JSON line naming an origin, then an email | kept o
 doctor, a free-text setting | password cut across JSON before the : | kept out
 doctor, a free-text setting | password cut across JSON at the : | kept out
 doctor, a free-text setting | password cut across JSON after an all-digit part | kept out
+doctor, a free-text setting | password cut across JSON, text before the scheme | kept out
+doctor, a free-text setting | password cut across JSON, a percent-encoded @ | kept out
+doctor, a free-text setting | password cut across JSON, a password trimmed away | kept out
 init entra --tenant | userinfo | refused
 init entra --tenant | DSN key=value | refused
 init entra --tenant | GitHub token | refused
@@ -149,6 +176,9 @@ init entra --tenant | JSON line naming an origin, then an email | refused
 init entra --tenant | password cut across JSON before the : | refused
 init entra --tenant | password cut across JSON at the : | refused
 init entra --tenant | password cut across JSON after an all-digit part | refused
+init entra --tenant | password cut across JSON, text before the scheme | refused
+init entra --tenant | password cut across JSON, a percent-encoded @ | refused
+init entra --tenant | password cut across JSON, a password trimmed away | refused
 init entra --public-url, in its path | userinfo | refused
 init entra --public-url, in its path | DSN key=value | refused
 init entra --public-url, in its path | GitHub token | refused
@@ -164,6 +194,9 @@ init entra --public-url, in its path | JSON line naming an origin, then an email
 init entra --public-url, in its path | password cut across JSON before the : | refused
 init entra --public-url, in its path | password cut across JSON at the : | refused
 init entra --public-url, in its path | password cut across JSON after an all-digit part | refused
+init entra --public-url, in its path | password cut across JSON, text before the scheme | refused
+init entra --public-url, in its path | password cut across JSON, a percent-encoded @ | refused
+init entra --public-url, in its path | password cut across JSON, a password trimmed away | refused
 init entra --upstream-url, in its query | userinfo | refused
 init entra --upstream-url, in its query | DSN key=value | refused
 init entra --upstream-url, in its query | GitHub token | refused
@@ -179,6 +212,9 @@ init entra --upstream-url, in its query | JSON line naming an origin, then an em
 init entra --upstream-url, in its query | password cut across JSON before the : | refused
 init entra --upstream-url, in its query | password cut across JSON at the : | refused
 init entra --upstream-url, in its query | password cut across JSON after an all-digit part | refused
+init entra --upstream-url, in its query | password cut across JSON, text before the scheme | refused
+init entra --upstream-url, in its query | password cut across JSON, a percent-encoded @ | refused
+init entra --upstream-url, in its query | password cut across JSON, a password trimmed away | refused
 init entra --secret-years | userinfo | refused
 init entra --secret-years | DSN key=value | refused
 init entra --secret-years | GitHub token | refused
@@ -194,6 +230,9 @@ init entra --secret-years | JSON line naming an origin, then an email | refused
 init entra --secret-years | password cut across JSON before the : | refused
 init entra --secret-years | password cut across JSON at the : | refused
 init entra --secret-years | password cut across JSON after an all-digit part | refused
+init entra --secret-years | password cut across JSON, text before the scheme | refused
+init entra --secret-years | password cut across JSON, a percent-encoded @ | refused
+init entra --secret-years | password cut across JSON, a password trimmed away | refused
 init entra --credential | userinfo | refused
 init entra --credential | DSN key=value | refused
 init entra --credential | GitHub token | refused
@@ -209,6 +248,9 @@ init entra --credential | JSON line naming an origin, then an email | refused
 init entra --credential | password cut across JSON before the : | refused
 init entra --credential | password cut across JSON at the : | refused
 init entra --credential | password cut across JSON after an all-digit part | refused
+init entra --credential | password cut across JSON, text before the scheme | refused
+init entra --credential | password cut across JSON, a percent-encoded @ | refused
+init entra --credential | password cut across JSON, a password trimmed away | refused
 revoke-user under oidc, the user key | userinfo | redacted
 revoke-user under oidc, the user key | DSN key=value | redacted
 revoke-user under oidc, the user key | GitHub token | redacted
@@ -224,6 +266,9 @@ revoke-user under oidc, the user key | JSON line naming an origin, then an email
 revoke-user under oidc, the user key | password cut across JSON before the : | shown
 revoke-user under oidc, the user key | password cut across JSON at the : | shown
 revoke-user under oidc, the user key | password cut across JSON after an all-digit part | shown
+revoke-user under oidc, the user key | password cut across JSON, text before the scheme | shown
+revoke-user under oidc, the user key | password cut across JSON, a percent-encoded @ | shown
+revoke-user under oidc, the user key | password cut across JSON, a password trimmed away | shown
 a log attribute, JSON | userinfo | redacted
 a log attribute, JSON | DSN key=value | redacted
 a log attribute, JSON | GitHub token | redacted
@@ -239,6 +284,9 @@ a log attribute, JSON | JSON line naming an origin, then an email | shown
 a log attribute, JSON | password cut across JSON before the : | shown
 a log attribute, JSON | password cut across JSON at the : | shown
 a log attribute, JSON | password cut across JSON after an all-digit part | shown
+a log attribute, JSON | password cut across JSON, text before the scheme | shown
+a log attribute, JSON | password cut across JSON, a percent-encoded @ | shown
+a log attribute, JSON | password cut across JSON, a password trimmed away | shown
 a log attribute, text | userinfo | redacted
 a log attribute, text | DSN key=value | redacted
 a log attribute, text | GitHub token | redacted
@@ -254,6 +302,9 @@ a log attribute, text | JSON line naming an origin, then an email | shown
 a log attribute, text | password cut across JSON before the : | shown
 a log attribute, text | password cut across JSON at the : | shown
 a log attribute, text | password cut across JSON after an all-digit part | shown
+a log attribute, text | password cut across JSON, text before the scheme | shown
+a log attribute, text | password cut across JSON, a percent-encoded @ | shown
+a log attribute, text | password cut across JSON, a password trimmed away | shown
 a stdio upstream's stderr line, as stdio logs it | userinfo | redacted
 a stdio upstream's stderr line, as stdio logs it | DSN key=value | redacted
 a stdio upstream's stderr line, as stdio logs it | GitHub token | redacted
@@ -269,3 +320,6 @@ a stdio upstream's stderr line, as stdio logs it | JSON line naming an origin, t
 a stdio upstream's stderr line, as stdio logs it | password cut across JSON before the : | shown
 a stdio upstream's stderr line, as stdio logs it | password cut across JSON at the : | shown
 a stdio upstream's stderr line, as stdio logs it | password cut across JSON after an all-digit part | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON, text before the scheme | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON, a percent-encoded @ | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON, a password trimmed away | shown

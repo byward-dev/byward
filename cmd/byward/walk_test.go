@@ -37,6 +37,9 @@ var walkOnlyForms = []struct{ name, value string }{
 	{"password cut across JSON before the :", `{"postgres://u":"` + "LK7CANARY" + `@h"}`},
 	{"password cut across JSON at the :", `["postgres://u:","` + "LK7CANARY" + `@h"]`},
 	{"password cut across JSON after an all-digit part", `["postgres://u:123","4` + "LK7CANARY" + `@h"]`},
+	{"password cut across JSON, text before the scheme", `["dsn=postgres://app:` + "LK7CANARY" + `","x@db"]`},
+	{"password cut across JSON, a percent-encoded @", `["postgres://app:` + "LK7CANARY" + `","x%40db"]`},
+	{"password cut across JSON, a password trimmed away", `["postgres://app:\"","` + "LK7CANARY" + `@db"]`},
 }
 
 // walkSurface is one place byward prints a value it was given: run gives it v and returns the exit
@@ -187,6 +190,7 @@ func TestEveryPrintingSurfaceDecidesEveryKindAsPinned(t *testing.T) {
 	var all, shown strings.Builder
 	all.WriteString("# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. surface | kind | outcome (#657)\n")
 	shown.WriteString("# Generated: the cells of walk.golden that show a value; each is a Known gap (docs/security-posture.md), a Known residual or allowed by decision (#657)\n")
+	shown.WriteString("# a connection string with a password, cut across two JSON strings, that the list rule does not find (text before the scheme, a percent-encoded @, or a password trimmed away), is allowed by decision (#657)\n")
 	for _, s := range surfaces {
 		for _, form := range append(slices.Clone(secretForms), walkOnlyForms...) {
 			if !slices.Contains(walkKinds, form.name) && !slices.Contains(walkOnlyForms, form) {

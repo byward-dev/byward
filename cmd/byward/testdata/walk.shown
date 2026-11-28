@@ -1,15 +1,22 @@
 # Generated: the cells of walk.golden that show a value; each is a Known gap (docs/security-posture.md), a Known residual or allowed by decision (#657)
+# a connection string with a password, cut across two JSON strings, that the list rule does not find (text before the scheme, a percent-encoded @, or a password trimmed away), is allowed by decision (#657)
 startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON | shown
 startup log, a free-text setting | JSON line naming an origin, then an email | shown
 startup log, a free-text setting | password cut across JSON before the : | shown
 startup log, a free-text setting | password cut across JSON at the : | shown
 startup log, a free-text setting | password cut across JSON after an all-digit part | shown
+startup log, a free-text setting | password cut across JSON, text before the scheme | shown
+startup log, a free-text setting | password cut across JSON, a percent-encoded @ | shown
+startup log, a free-text setting | password cut across JSON, a password trimmed away | shown
 --print-config, a free-text setting | opaque Bearer credential | shown
 --print-config, a free-text setting | DSN with JSON-escaped slashes, outside JSON | shown
 --print-config, a free-text setting | JSON line naming an origin, then an email | shown
 --print-config, a free-text setting | password cut across JSON before the : | shown
 --print-config, a free-text setting | password cut across JSON at the : | shown
 --print-config, a free-text setting | password cut across JSON after an all-digit part | shown
+--print-config, a free-text setting | password cut across JSON, text before the scheme | shown
+--print-config, a free-text setting | password cut across JSON, a percent-encoded @ | shown
+--print-config, a free-text setting | password cut across JSON, a password trimmed away | shown
 --print-config, a URL list setting's entry | opaque Bearer credential | shown
 --print-config, a path setting | opaque Bearer credential | shown
 --print-config, a path setting | DSN with JSON-escaped slashes, outside JSON | shown
@@ -22,18 +29,30 @@ revoke-user under oidc, the user key | JSON line naming an origin, then an email
 revoke-user under oidc, the user key | password cut across JSON before the : | shown
 revoke-user under oidc, the user key | password cut across JSON at the : | shown
 revoke-user under oidc, the user key | password cut across JSON after an all-digit part | shown
+revoke-user under oidc, the user key | password cut across JSON, text before the scheme | shown
+revoke-user under oidc, the user key | password cut across JSON, a percent-encoded @ | shown
+revoke-user under oidc, the user key | password cut across JSON, a password trimmed away | shown
 a log attribute, JSON | DSN with JSON-escaped slashes, outside JSON | shown
 a log attribute, JSON | JSON line naming an origin, then an email | shown
 a log attribute, JSON | password cut across JSON before the : | shown
 a log attribute, JSON | password cut across JSON at the : | shown
 a log attribute, JSON | password cut across JSON after an all-digit part | shown
+a log attribute, JSON | password cut across JSON, text before the scheme | shown
+a log attribute, JSON | password cut across JSON, a percent-encoded @ | shown
+a log attribute, JSON | password cut across JSON, a password trimmed away | shown
 a log attribute, text | DSN with JSON-escaped slashes, outside JSON | shown
 a log attribute, text | JSON line naming an origin, then an email | shown
 a log attribute, text | password cut across JSON before the : | shown
 a log attribute, text | password cut across JSON at the : | shown
 a log attribute, text | password cut across JSON after an all-digit part | shown
+a log attribute, text | password cut across JSON, text before the scheme | shown
+a log attribute, text | password cut across JSON, a percent-encoded @ | shown
+a log attribute, text | password cut across JSON, a password trimmed away | shown
 a stdio upstream's stderr line, as stdio logs it | DSN with JSON-escaped slashes, outside JSON | shown
 a stdio upstream's stderr line, as stdio logs it | JSON line naming an origin, then an email | shown
 a stdio upstream's stderr line, as stdio logs it | password cut across JSON before the : | shown
 a stdio upstream's stderr line, as stdio logs it | password cut across JSON at the : | shown
 a stdio upstream's stderr line, as stdio logs it | password cut across JSON after an all-digit part | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON, text before the scheme | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON, a percent-encoded @ | shown
+a stdio upstream's stderr line, as stdio logs it | password cut across JSON, a password trimmed away | shown
