@@ -137,7 +137,7 @@ var splitURLEntry = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^/@\s]*:([^/
 // a Y that is neither empty nor a port (all digits), and a later entry with an @ before any /. A
 // password of digits only, split by a comma, is not found (docs/security-posture.md).
 func splitPassword(entries []string) bool {
-	// atLater[i] is whether an entry after i has an @ before any /, so the list is read once.
+	// atLater[i] is whether an entry after i has an @ before any /, so the list is read in linear time.
 	atLater := make([]bool, len(entries)+1)
 	for i := len(entries) - 1; i >= 0; i-- {
 		at := strings.IndexByte(entries[i], '@')

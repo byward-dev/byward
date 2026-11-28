@@ -22,7 +22,15 @@ import (
 // what config refuses in a setting that is not secret, and logs hide. The opaque Bearer credential is
 // redact-only, a Known gap (docs/security-posture.md), so its "shown" cells are pinned in walk.shown.
 var walkKinds = []string{"userinfo", "DSN key=value", "GitHub token", "Slack token", "JWT",
-	"GitHub token after a line break", "GitHub token percent-escaped", "opaque Bearer credential"}
+	"GitHub token after a line break", "GitHub token percent-escaped", "opaque Bearer credential",
+	"DSN in a JSON line", "password key after a vertical tab"}
+
+// walkOnlyForms are forms the walk pins but the other leak tests do not take: a DSN with
+// JSON-escaped slashes outside a JSON document, which no kind matches, so main shows it, and so does
+// this PR (a Known residual, #657); a fix shows up as a changed walk.golden line.
+var walkOnlyForms = []struct{ name, value string }{
+	{"DSN with JSON-escaped slashes, outside JSON", `postgres:\/\/app:` + "LK7CANARY" + "@db.example/x"},
+}
 
 // walkSurface is one place byward prints a value it was given: run gives it v and returns the exit
 // code and everything printed. command and flag name what it covers, for walkGaps.
@@ -172,8 +180,8 @@ func TestEveryPrintingSurfaceDecidesEveryKindAsPinned(t *testing.T) {
 	all.WriteString("# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. surface | kind | outcome (#657)\n")
 	shown.WriteString("# Generated: the cells of walk.golden that show a value; each is a Known gap (docs/security-posture.md)\n")
 	for _, s := range surfaces {
-		for _, form := range secretForms {
-			if !slices.Contains(walkKinds, form.name) {
+		for _, form := range append(slices.Clone(secretForms), walkOnlyForms...) {
+			if !slices.Contains(walkKinds, form.name) && !slices.Contains(walkOnlyForms, form) {
 				continue
 			}
 			code, out := s.run(form.value)

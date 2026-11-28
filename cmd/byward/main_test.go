@@ -80,7 +80,7 @@ func oidcAuthEnv(t *testing.T) []string {
 	return append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+secret)
 }
 
-// keycloakOperatorEnv is an operator command's env (operatorEnv) for a keycloak IdP that admits a user
+// keycloakOperatorEnv is an Entra env (authEnv or operatorEnv) made one for a keycloak IdP that admits a user
 // with no group, with the Entra client secret as the oidc one, and extra after.
 func keycloakOperatorEnv(env []string, extra ...string) []string {
 	return append(append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(env, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),

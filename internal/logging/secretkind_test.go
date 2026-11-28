@@ -75,9 +75,10 @@ var secretKinds = []struct{ value, class string }{
 	{"z://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},
 	{"s0://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind}, // a digit after the scheme's first letter, at each end of the range
 	{"s9://app:" + "Q7Q7Q7Q7" + "@h.example", passwordKind},
-	{"postgres://app:" + "Q7Q7Q7Q7" + "\"@db.example/app", passwordKind},        // a " ending the password
-	{"postgres://app:" + "p\"w" + "Q7Q7Q7Q7" + "@db.example/app", passwordKind}, // a " inside it
-	{"postgres://app:" + "\"" + "@db.example/app", passwordKind},                // a password that is only a "
+	{"postgres://app:" + "Q7Q7Q7Q7" + "\"@db.example/app", passwordKind},         // a " ending the password
+	{"postgres://app:" + "p\"w" + "Q7Q7Q7Q7" + "@db.example/app", passwordKind},  // a " inside it
+	{"postgres://app:" + "\"" + "@db.example/app", passwordKind},                 // a password that is only a "
+	{"xoxe" + "Z" + "xapp-ABCDEFGHIJ postgres://u:" + "pa55@h/db", passwordKind}, // a prefix's . is a dot, not any character: no token, so the password is named
 }
 
 // secretKind names each kind, and nothing else: a prefix named in prose, with too few token
@@ -255,6 +256,10 @@ func TestWhatConfigRefusesAsItShowsAValueIsRedacted(t *testing.T) {
 			t.Errorf("%q: a JSON line with a secret, read as given, is not redacted", v)
 		}
 	}
+	// A URL list shows each entry trimmed, so a JWT cut short before white space is one there.
+	if jwt := "eyJ" + "hbGciOiJIUzI1NiJ9." + "eyJ" + "zdWIiOiJ4In0"; !LooksSecret(jwt+" ") || !LooksSecret("app.example,"+jwt+"\t") {
+		t.Errorf("a JWT cut short before white space, which a URL list shows trimmed, is not redacted")
+	}
 	for _, v := range []string{"postgres://u:pa, " + "ss@h", "postgres://u:pa,x/y," + "ss@h", "postgres://u\n:Q7Q7Q7," + "q x@h"} { // the last only as quoted
 		if ShownListSecretKind(strings.Split(AsGiven(v), ",")) != passwordKind || !LooksSecret(v) { // a list as config shows it
 			t.Errorf("%q: refused as a list but redacted %v", v, LooksSecret(v))
@@ -304,5 +309,16 @@ func TestShownSecretKindReadsAJSONDocumentByItsParts(t *testing.T) {
 		if got := LooksSecret(tc.shown); got != (tc.want != "") {
 			t.Errorf("%s: LooksSecret(%q) = %v, want %v", tc.name, tc.shown, got, tc.want != "")
 		}
+	}
+}
+
+// LooksSecret reads a string of at most 16 KiB; a longer one is redacted unread, so what logs cost
+// for a value an unauthenticated client controls is bounded (#657).
+func TestLooksSecretReadsAtMost16KiB(t *testing.T) {
+	if LooksSecret(strings.Repeat("x", 16<<10)) {
+		t.Error("a harmless string of 16 KiB is redacted, want it read and kept")
+	}
+	if !LooksSecret(strings.Repeat("x", 16<<10+1)) {
+		t.Error("a string of 16 KiB and one byte is kept, want it redacted unread")
 	}
 }

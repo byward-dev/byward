@@ -193,8 +193,14 @@ var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 // (#594). It decides how a value is shown, never whether it is accepted: it over-matches by design
 // (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides more, but refuses nothing.
 func LooksSecret(s string) bool {
-	return authScheme.MatchString(s) || jwtShape.MatchString(s) || catalogueRefuses(s)
+	return len(s) > lookedAtMax || authScheme.MatchString(s) || jwtShape.MatchString(s) || catalogueRefuses(s)
 }
+
+// lookedAtMax is the longest string LooksSecret reads; a longer one is redacted unread, which only
+// ever hides more, so a request's path or an attribute an unauthenticated client controls costs at
+// most one read of 16 KiB (#657). It is above MaxStderrLine (8 KiB), so no stdio upstream's stderr
+// line is affected. Config's refusal reads every value whole: only the redact grade is capped.
+const lookedAtMax = 16 << 10
 
 // catalogueRefuses reports whether config would refuse s in a setting that is not secret, however
 // that setting shows it: as given or quoted when it is not printable (AsGiven), each whole and as a
@@ -207,11 +213,24 @@ func catalogueRefuses(s string) bool {
 		readings = append(readings, quoted)
 	}
 	for _, r := range readings {
-		if ShownSecretKind(r) != "" || strings.Contains(r, ",") && ShownListSecretKind(strings.Split(r, ",")) != "" {
+		if ShownSecretKind(r) != "" {
+			return true
+		}
+		// A list shape shows each entry trimmed (a URL list's entry as MarkedURL shows it).
+		if entries := strings.Split(r, ","); (len(entries) > 1 || strings.TrimSpace(r) != r) && ShownListSecretKind(trimmed(entries)) != "" {
 			return true
 		}
 	}
 	return false
+}
+
+// trimmed is entries, each with its surrounding white space removed.
+func trimmed(entries []string) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = strings.TrimSpace(e)
+	}
+	return out
 }
 
 // HoldsJWT reports whether s holds a compact JWS or JWE: a segment starting eyJ at the start of a

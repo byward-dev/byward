@@ -1,5 +1,15 @@
 # Generated: the cells of walk.golden that show a value; each is a Known gap (docs/security-posture.md)
+startup log, a free-text setting | DSN with JSON-escaped slashes, outside JSON | shown
 --print-config, a free-text setting | opaque Bearer credential | shown
+--print-config, a free-text setting | DSN with JSON-escaped slashes, outside JSON | shown
 --print-config, a URL list setting's entry | opaque Bearer credential | shown
 --print-config, a path setting | opaque Bearer credential | shown
+--print-config, a path setting | DSN with JSON-escaped slashes, outside JSON | shown
 --print-config, the stdio upstream's program | opaque Bearer credential | shown
+--print-config, the stdio upstream's program | DSN with JSON-escaped slashes, outside JSON | shown
+init entra --public-url, in its path | DSN with JSON-escaped slashes, outside JSON | shown
+init entra --upstream-url, in its query | DSN with JSON-escaped slashes, outside JSON | shown
+revoke-user under oidc, the user key | DSN with JSON-escaped slashes, outside JSON | shown
+a log attribute, JSON | DSN with JSON-escaped slashes, outside JSON | shown
+a log attribute, text | DSN with JSON-escaped slashes, outside JSON | shown
+a stdio upstream's stderr line, as stdio logs it | DSN with JSON-escaped slashes, outside JSON | shown

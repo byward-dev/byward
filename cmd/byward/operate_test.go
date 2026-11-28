@@ -249,8 +249,7 @@ func TestCheckOfflineWarnsThatPlainIdentityHeadersAreOn(t *testing.T) {
 func TestCheckOfflineNamesAnOIDCClientCredential(t *testing.T) {
 	urls := []string{"BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"}
 	base := append(authEnv(t), urls...)
-	oidcEnv := append(append(oidcAuthEnv(t), urls...),
-		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
+	oidcEnv := keycloakOperatorEnv(append(authEnv(t), urls...))
 	for name, tc := range map[string]struct {
 		env  []string
 		line string // "" means no credential line

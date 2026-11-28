@@ -49,7 +49,9 @@ var secretForms = []struct{ name, value string }{
 	{"JWT", "eyJ" + "hbGciOiJSUzI1NiJ9." + "LK7CANARY" + ".c2lnbmF0dXJl"},
 	{"GitHub token after a line break", "x\n" + "ghp_" + "LK7CANARY" + "Q7Q7Q7"},
 	{"GitHub token percent-escaped", "https://h.example/ghp%5F" + "LK7CANARY" + "Q7Q7Q7"},
-	{"opaque Bearer credential", "Bearer " + "LK7CANARY" + "Q7Q7Q7Q7"}, // redact-only: a Known gap (#657)
+	{"opaque Bearer credential", "Bearer " + "LK7CANARY" + "Q7Q7Q7Q7"},                  // redact-only: a Known gap (#657)
+	{"DSN in a JSON line", `{"dsn":"postgres://app:` + "LK7CANARY" + `@db.example/x"}`}, // read by its parts
+	{"password key after a vertical tab", "host=db\v" + "password=LK7CANARY"},           // found only as it is shown, quoted
 }
 
 // hostForm is a secret in a URL's host, which is a valid host name. A URL setting's shape shows an
