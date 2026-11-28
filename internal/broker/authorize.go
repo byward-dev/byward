@@ -236,8 +236,12 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 	b.observeIdP(ctx, OpAuthorize, start, err)
 	if err != nil && (shutdown.ShuttingDown(ctx) || shutdown.ClientWentAway(ctx)) { // as refreshIdP's ended
 		// Discovery, before it is cached, ran under a request that ended: requestEnded's rule (refresh.go).
-		if ie := (*idp.Error)(nil); !errors.As(err, &ie) || ie.Class != idp.Unavailable {
+		if idp.ClassOf(err) != idp.Unavailable { // err is not nil here
 			b.noteIdPFailure(r, l.ClientID, err)
+			if l.Silent { // the refusal's signals stay; only its redirect follows the ending (as refuseSilently)
+				b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentSilent, Outcome: audit.Failure, Reason: "temporarily_unavailable", ClientID: l.ClientID, IdP: b.cfg.IdPName})
+				b.cfg.ObserveConsent("", ConsentOutcomeSilentRefused)
+			}
 		}
 		shutdown.AnswerIfEnded(w, r)
 		return

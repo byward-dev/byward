@@ -264,6 +264,37 @@ func TestTheBrokerLifecycleMatrix(t *testing.T) {
 					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: tc.warns, audit: tc.audit})
 				})
 			}
+			// A prompt=none sign-in starts at the IdP from /authorize. An Unavailable failure on an
+			// ended request writes nothing; a real one keeps its ERROR, its login failure and its
+			// consent_silent refusal, and only the redirect follows the ending (requestEnded's rule).
+			for name, tc := range map[string]struct {
+				err     error
+				warns   []string
+				audit   []string
+				counted []string // the consent outcomes observed
+			}{
+				"/authorize prompt=none, the IdP's discovery": {err: &idp.Error{Class: idp.Unavailable, Err: context.Canceled}},
+				"/authorize prompt=none, an IdP that fails": {err: &idp.Error{Class: idp.Fatal, Err: errors.New("discovery: issuer mismatch")},
+					warns: []string{"IdP sign-in failed"}, audit: []string{"login failure", "consent_silent failure"}, counted: []string{" " + ConsentOutcomeSilentRefused}},
+			} {
+				t.Run(name, func(t *testing.T) {
+					counted := &consentOutcomes{}
+					e := newEnv(t, withRemember(t, counted))
+					h := e.remember(t, nil) // its own sign-in discovers; the next AuthCodeURL fails
+					cfg := e.cfg
+					cfg.IdP = &failOnceIdP{IdP: cfg.IdP, err: tc.err}
+					e.start(t, cfg)
+					lm, am, before := len(e.logs.String()), len(e.audit.String()), len(counted.list())
+					r := httptest.NewRequest(http.MethodGet, issuer+"/authorize?"+authorizeQuery(silent(nil)).Encode(), nil)
+					r.AddCookie(h)
+					w := e.serveIn(endedCtx(end), r)
+					end.Answered(t, w)
+					e.pinned(t, w, lm, am, brokerCell{status: end.Status, body: end.Body, warns: tc.warns, audit: tc.audit})
+					if got := counted.list()[before:]; !slices.Equal(got, tc.counted) {
+						t.Errorf("consent outcomes %q; want %q", got, tc.counted)
+					}
+				})
+			}
 			// A refresh the IdP fails for real (not Unavailable), on an ended request: its ERROR and
 			// token_rejected stay; the answer follows the ending (requestEnded's rule, #700).
 			t.Run("/token, an IdP refresh that fails", func(t *testing.T) {
